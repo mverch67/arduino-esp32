@@ -15,7 +15,11 @@ files:
     - "variants/esp32s3/**/*"
     - "variants/esp32c3/**/*"
     - "libraries/**/*"
+    - "components/**/*"
     - "CMakeLists.txt"
     - "Kconfig.projbuild"
   exclude:
     - "**/*"
+
+dependencies:
+  esp_io_expander_tca95xx_16bit: "==1.0.1"

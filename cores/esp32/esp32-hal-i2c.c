@@ -27,6 +27,11 @@
 #include "hal/i2c_ll.h"
 #include "driver/i2c.h"
 
+#include "esp_io_expander_tca95xx_16bit.h"
+
+extern esp_io_expander_handle_t io_expander;
+
+
 typedef volatile struct {
     bool initialized;
     uint32_t frequency;
@@ -100,6 +105,12 @@ esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency){
 #if !CONFIG_DISABLE_HAL_LOCKS
     //release lock
     xSemaphoreGive(bus[i2c_num].lock);
+#endif
+#ifdef IO_EXPANDER
+    if (!io_expander) {
+        log_i("esp_io_expander_new_i2c_tca95xx_16bit()");
+        esp_io_expander_new_i2c_tca95xx_16bit(1, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000, &io_expander);
+    }
 #endif
     return ret;
 }

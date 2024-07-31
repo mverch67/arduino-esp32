@@ -15,6 +15,9 @@
 #include "esp32-hal-gpio.h"
 #include "hal/gpio_hal.h"
 #include "soc/soc_caps.h"
+#include "esp_io_expander_tca95xx_16bit.h"
+
+esp_io_expander_handle_t io_expander = NULL;
 
 // It fixes lack of pin definition for S3 and for any future SoC
 // this function works for ESP32, ESP32-S2 and ESP32-S3 - including the C3, it will return -1 for any pin
@@ -85,7 +88,7 @@ typedef struct {
     void* arg;
     bool functional;
 } InterruptHandle_t;
-static InterruptHandle_t __pinInterruptHandlers[SOC_GPIO_PIN_COUNT] = {0,};
+static InterruptHandle_t __pinInterruptHandlers[SOC_GPIO_PIN_COUNT+64] = {0,};
 
 #include "driver/rtc_io.h"
 
@@ -94,6 +97,18 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode)
 #ifdef RGB_BUILTIN
     if (pin == RGB_BUILTIN){
         __pinMode(RGB_BUILTIN-SOC_GPIO_PIN_COUNT, mode);
+        return;
+    }
+#endif
+
+#ifdef IO_EXPANDER
+    if (pin & IO_EXPANDER) {
+        pin = pin & ~IO_EXPANDER;
+        esp_io_expander_dir_t io_mode = IO_EXPANDER_INPUT;
+        if (mode == OUTPUT)
+            io_mode = IO_EXPANDER_OUTPUT;
+       	log_d("esp_io_expander_set_dir(IO%02d, %d)", pin, io_mode);
+        esp_io_expander_set_dir(io_expander, 1 << pin , io_mode);
         return;
     }
 #endif
@@ -142,12 +157,30 @@ extern void ARDUINO_ISR_ATTR __digitalWrite(uint8_t pin, uint8_t val)
             return;
         }
     #endif
-	gpio_set_level((gpio_num_t)pin, val);
+#ifdef IO_EXPANDER
+    if (pin & IO_EXPANDER) {
+        pin &= ~IO_EXPANDER;
+       	log_d("esp_io_expander_set_level(IO%02d --> %d)", pin, val);
+        esp_io_expander_set_level(io_expander, 1 << pin, val);
+        return;
+    }
+#endif
+    gpio_set_level((gpio_num_t)pin, val);
 }
 
 extern int ARDUINO_ISR_ATTR __digitalRead(uint8_t pin)
 {
-	return gpio_get_level((gpio_num_t)pin);
+#ifdef IO_EXPANDER
+    if (pin & IO_EXPANDER) {
+        pin &= ~IO_EXPANDER;
+        uint32_t level_mask = 0;
+        esp_err_t err = esp_io_expander_get_level(io_expander, 1 << pin , &level_mask);
+       	log_d("esp_io_expander_get_level(IO%02d:%d --> %d)", pin, err, level_mask >> pin);
+        return (level_mask >> pin);
+//        return esp_io_expander_get_level(io_expander, 1 << pin , &level_mask);
+    }
+#endif
+    return gpio_get_level((gpio_num_t)pin);
 }
 
 static void ARDUINO_ISR_ATTR __onPinInterrupt(void * arg) {
@@ -168,7 +201,7 @@ extern void __attachInterruptFunctionalArg(uint8_t pin, voidFuncPtrArg userFunc,
     static bool interrupt_initialized = false;
 
     // makes sure that pin -1 (255) will never work -- this follows Arduino standard
-    if (pin >= SOC_GPIO_PIN_COUNT) return;
+    if (pin >= SOC_GPIO_PIN_COUNT+64) return;
 
     if(!interrupt_initialized) {
     	esp_err_t err = gpio_install_isr_service((int)ARDUINO_ISR_FLAG);

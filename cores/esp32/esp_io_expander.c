@@ -77,8 +77,9 @@ esp_err_t esp_io_expander_set_level(esp_io_expander_handle_t handle, uint32_t pi
             if ((dir_bit && handle->config.flags.dir_out_bit_zero) || (!dir_bit && !handle->config.flags.dir_out_bit_zero)) {
                 /* 1. 1 && Set 1 to input */
                 /* 2. 0 && Set 0 to input */
-                ESP_LOGE(TAG, "Pin[%d] can't set level in input mode", i);
-                return ESP_ERR_INVALID_STATE;
+                //ESP_LOGE(TAG, "Pin[%d] can't set level in input mode", i);
+                //return ESP_ERR_INVALID_STATE;
+                ESP_RETURN_ON_ERROR(write_reg(handle, REG_DIRECTION, !dir_reg), TAG, "Overwrite direction reg failed");
             }
         }
     }

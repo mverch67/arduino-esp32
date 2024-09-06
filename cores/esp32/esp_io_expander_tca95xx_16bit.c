@@ -11,7 +11,7 @@
 #include "driver/i2c.h"
 #include "esp_bit_defs.h"
 #include "esp_check.h"
-#include "esp_log.h"
+#include "esp32-hal-log.h"
 
 #include "esp_io_expander.h"
 #include "esp_io_expander_tca95xx_16bit.h"
@@ -96,6 +96,7 @@ static esp_err_t read_input_reg(esp_io_expander_handle_t handle, uint32_t *value
         TAG, "Read input reg failed");
     // *INDENT-ON*
     *value = (((uint32_t)temp[1]) << 8) | (temp[0]);
+    log_d("value=%d", *value);
     return ESP_OK;
 }
 
@@ -104,6 +105,7 @@ static esp_err_t write_output_reg(esp_io_expander_handle_t handle, uint32_t valu
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
     value &= 0xffff;
 
+    log_d("value=%d", value);
     uint8_t data[] = {OUTPUT_REG_ADDR, value & 0xff, value >> 8};
     ESP_RETURN_ON_ERROR(
         i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
@@ -117,6 +119,7 @@ static esp_err_t read_output_reg(esp_io_expander_handle_t handle, uint32_t *valu
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
 
     *value = tca->regs.output;
+    log_d("value=%d", *value);
     return ESP_OK;
 }
 
@@ -125,6 +128,7 @@ static esp_err_t write_direction_reg(esp_io_expander_handle_t handle, uint32_t v
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
     value &= 0xffff;
 
+    log_d("value=%d", value);
     uint8_t data[] = {DIRECTION_REG_ADDR, value & 0xff, value >> 8};
     ESP_RETURN_ON_ERROR(
         i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
@@ -138,11 +142,13 @@ static esp_err_t read_direction_reg(esp_io_expander_handle_t handle, uint32_t *v
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
 
     *value = tca->regs.direction;
+    log_d("value=%d", *value);
     return ESP_OK;
 }
 
 static esp_err_t reset(esp_io_expander_t *handle)
 {
+    log_i("*** reset ***");
     ESP_RETURN_ON_ERROR(write_direction_reg(handle, DIR_REG_DEFAULT_VAL), TAG, "Write dir reg failed");
     ESP_RETURN_ON_ERROR(write_output_reg(handle, OUT_REG_DEFAULT_VAL), TAG, "Write output reg failed");
     return ESP_OK;

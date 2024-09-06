@@ -77,7 +77,7 @@ esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency){
     } else if(frequency > 1000000UL){
         frequency = 1000000UL;
     }
-    log_i("Initialising I2C Master: sda=%d scl=%d freq=%d", sda, scl, frequency);
+    log_i("Initialising I2C Master %d: sda=%d scl=%d freq=%d", i2c_num, sda, scl, frequency);
 
     i2c_config_t conf = { };
     conf.mode = I2C_MODE_MASTER;

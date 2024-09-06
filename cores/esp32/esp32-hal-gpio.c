@@ -107,7 +107,7 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode)
         esp_io_expander_dir_t io_mode = IO_EXPANDER_INPUT;
         if (mode == OUTPUT)
             io_mode = IO_EXPANDER_OUTPUT;
-       	log_d("esp_io_expander_set_dir(IO%02d, %d)", pin, io_mode);
+       	log_i("esp_io_expander_set_dir(IO%02d, %d)", pin, io_mode);
         esp_io_expander_set_dir(io_expander, 1 << pin , io_mode);
         return;
     }
@@ -160,7 +160,7 @@ extern void ARDUINO_ISR_ATTR __digitalWrite(uint8_t pin, uint8_t val)
 #ifdef IO_EXPANDER
     if (pin & IO_EXPANDER) {
         pin &= ~IO_EXPANDER;
-       	log_d("esp_io_expander_set_level(IO%02d --> %d)", pin, val);
+       	log_i("esp_io_expander_set_level(IO%02d --> %d)", pin, val);
         esp_io_expander_set_level(io_expander, 1 << pin, val);
         return;
     }
@@ -175,7 +175,7 @@ extern int ARDUINO_ISR_ATTR __digitalRead(uint8_t pin)
         pin &= ~IO_EXPANDER;
         uint32_t level_mask = 0;
         esp_err_t err = esp_io_expander_get_level(io_expander, 1 << pin , &level_mask);
-       	log_d("esp_io_expander_get_level(IO%02d:%d --> %d)", pin, err, level_mask >> pin);
+       	log_i("esp_io_expander_get_level(IO%02d:%d --> %d)", pin, err, level_mask >> pin);
         return (level_mask >> pin);
 //        return esp_io_expander_get_level(io_expander, 1 << pin , &level_mask);
     }

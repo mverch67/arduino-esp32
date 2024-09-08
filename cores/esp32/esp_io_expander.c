@@ -10,6 +10,7 @@
 #include "esp_bit_defs.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp32-hal-log.h"
 
 #include "esp_io_expander.h"
  
@@ -183,7 +184,8 @@ esp_err_t esp_io_expander_del(esp_io_expander_handle_t handle)
  *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
  */
 static esp_err_t write_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint32_t value)
-{
+{   
+    //log_i("reg=0x%02x -> %08x", reg, value);
     switch (reg) {
     case REG_OUTPUT:
         ESP_RETURN_ON_FALSE(handle->write_output_reg, ESP_ERR_NOT_SUPPORTED, TAG, "write_output_reg isn't implemented");

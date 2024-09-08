@@ -107,7 +107,9 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode)
         esp_io_expander_dir_t io_mode = IO_EXPANDER_INPUT;
         if (mode == OUTPUT)
             io_mode = IO_EXPANDER_OUTPUT;
-       	log_i("esp_io_expander_set_dir(IO%02d, %d)", pin, io_mode);
+#ifdef IO_EXPANDER_DEBUG
+       	log_d("esp_io_expander_set_dir(IO%02d, %d)", pin, io_mode);
+#endif
         esp_io_expander_set_dir(io_expander, 1 << pin , io_mode);
         return;
     }
@@ -160,7 +162,9 @@ extern void ARDUINO_ISR_ATTR __digitalWrite(uint8_t pin, uint8_t val)
 #ifdef IO_EXPANDER
     if (pin & IO_EXPANDER) {
         pin &= ~IO_EXPANDER;
-       	log_i("esp_io_expander_set_level(IO%02d --> %d)", pin, val);
+#ifdef IO_EXPANDER_DEBUG
+       	log_d("esp_io_expander_set_level(IO%02d --> %d)", pin, val);
+#endif
         esp_io_expander_set_level(io_expander, 1 << pin, val);
         return;
     }
@@ -175,9 +179,10 @@ extern int ARDUINO_ISR_ATTR __digitalRead(uint8_t pin)
         pin &= ~IO_EXPANDER;
         uint32_t level_mask = 0;
         esp_err_t err = esp_io_expander_get_level(io_expander, 1 << pin , &level_mask);
-       	log_i("esp_io_expander_get_level(IO%02d:%d --> %d)", pin, err, level_mask >> pin);
+#ifdef IO_EXPANDER_DEBUG
+       	log_d("esp_io_expander_get_level(IO%02d --> %d)", pin, level_mask >> pin);
+#endif
         return (level_mask >> pin);
-//        return esp_io_expander_get_level(io_expander, 1 << pin , &level_mask);
     }
 #endif
     return gpio_get_level((gpio_num_t)pin);
@@ -211,6 +216,8 @@ extern void __attachInterruptFunctionalArg(uint8_t pin, voidFuncPtrArg userFunc,
     	log_e("GPIO ISR Service Failed To Start");
     	return;
     }
+
+    log_d("pin:%d", pin);
 
     // if new attach without detach remove old info
     if (__pinInterruptHandlers[pin].functional && __pinInterruptHandlers[pin].arg)

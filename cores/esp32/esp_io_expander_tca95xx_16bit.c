@@ -56,6 +56,7 @@ static esp_err_t del(esp_io_expander_t *handle);
 
 esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_port_t i2c_num, uint32_t i2c_address, esp_io_expander_handle_t *handle)
 {
+    log_d("io expander init i2c(%d:0x%02x)", i2c_num, i2c_address);
     ESP_RETURN_ON_FALSE(i2c_num < I2C_NUM_MAX, ESP_ERR_INVALID_ARG, TAG, "Invalid i2c num");
     ESP_RETURN_ON_FALSE(handle, ESP_ERR_INVALID_ARG, TAG, "Invalid handle");
 
@@ -96,7 +97,7 @@ static esp_err_t read_input_reg(esp_io_expander_handle_t handle, uint32_t *value
         TAG, "Read input reg failed");
     // *INDENT-ON*
     *value = (((uint32_t)temp[1]) << 8) | (temp[0]);
-    log_d("value=%d", *value);
+    //log_d("i2c read values=%u %u", (uint16_t)temp[0], (uint16_t)temp[1]);
     return ESP_OK;
 }
 
@@ -105,8 +106,8 @@ static esp_err_t write_output_reg(esp_io_expander_handle_t handle, uint32_t valu
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
     value &= 0xffff;
 
-    log_d("value=%d", value);
     uint8_t data[] = {OUTPUT_REG_ADDR, value & 0xff, value >> 8};
+    //log_d("i2c(%d:0x%02x) write values: %u %u %u", tca->i2c_num, tca->i2c_address, data[0], data[1], data[2]);
     ESP_RETURN_ON_ERROR(
         i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
         TAG, "Write output reg failed");
@@ -119,7 +120,7 @@ static esp_err_t read_output_reg(esp_io_expander_handle_t handle, uint32_t *valu
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
 
     *value = tca->regs.output;
-    log_d("value=%d", *value);
+    //log_d("value=%d", *value);
     return ESP_OK;
 }
 
@@ -128,8 +129,8 @@ static esp_err_t write_direction_reg(esp_io_expander_handle_t handle, uint32_t v
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
     value &= 0xffff;
 
-    log_d("value=%d", value);
     uint8_t data[] = {DIRECTION_REG_ADDR, value & 0xff, value >> 8};
+    //log_d("i2c(%d) write values: %u %u %u", tca->i2c_num, data[0], data[1], data[2]);
     ESP_RETURN_ON_ERROR(
         i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
         TAG, "Write direction reg failed");
@@ -142,13 +143,12 @@ static esp_err_t read_direction_reg(esp_io_expander_handle_t handle, uint32_t *v
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
 
     *value = tca->regs.direction;
-    log_d("value=%d", *value);
+    //log_d("value=%d", *value);
     return ESP_OK;
 }
 
 static esp_err_t reset(esp_io_expander_t *handle)
 {
-    log_i("*** reset ***");
     ESP_RETURN_ON_ERROR(write_direction_reg(handle, DIR_REG_DEFAULT_VAL), TAG, "Write dir reg failed");
     ESP_RETURN_ON_ERROR(write_output_reg(handle, OUT_REG_DEFAULT_VAL), TAG, "Write output reg failed");
     return ESP_OK;

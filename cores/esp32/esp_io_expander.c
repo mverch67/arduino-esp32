@@ -6,11 +6,13 @@
 
 #include <inttypes.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "esp_bit_defs.h"
 #include "esp_check.h"
 #include "esp_log.h"
 #include "esp32-hal-log.h"
+#include "esp32-hal-gpio.h"
 
 #include "esp_io_expander.h"
  
@@ -27,6 +29,7 @@ typedef enum {
 } reg_type_t;
 
 static const char *TAG = "io_expander";
+
 
 static esp_err_t write_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint32_t value);
 static esp_err_t read_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint32_t *value);
@@ -228,4 +231,97 @@ static esp_err_t read_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint3
     }
 
     return ESP_OK;
+}
+
+
+
+
+/**
+ * @brief Setup IO IRQ
+ *
+ * @param handle   : IO Expander handle
+ * @param pin      : IO expander IRQ GPIO pin
+ * @param isr      : interrupt handler to be triggert
+ * @param mode     : defines when the interrupt should be triggered.
+ *   GPIO_INTR_DISABLE = 0,     Disable GPIO interrupt
+ *   GPIO_INTR_POSEDGE = 1,     GPIO interrupt type : rising edge
+ *   GPIO_INTR_NEGEDGE = 2,     GPIO interrupt type : falling edge
+ *   GPIO_INTR_ANYEDGE = 3,     GPIO interrupt type : both rising and falling edge
+ *   GPIO_INTR_LOW_LEVEL = 4,   GPIO interrupt type : input low level trigger
+ *   GPIO_INTR_HIGH_LEVEL = 5,  GPIO interrupt type : input high level trigger
+ *
+ * @return
+ *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+ *
+ */
+esp_err_t esp_io_expander_setup_IRQ(esp_io_expander_handle_t handle, voidIOExpanderISRHandler cb, uint8_t pin, int mode)
+{
+    if (!handle->pinIOExpanderISRs) {
+        handle->pinIOExpanderISRs = malloc(sizeof(ISRHandle_t) * handle->config.io_count);
+        memset(handle->pinIOExpanderISRs, 0, sizeof(ISRHandle_t) * handle->config.io_count);
+        attachInterruptArg(pin, cb, handle, mode);
+        return ESP_OK;
+    }
+    else {
+        return ESP_FAIL;
+    }
+}
+
+/**
+ * @brief process interrupts (mandatory if ISRs attached)
+ *
+ * @param handle: IO Expander handle
+ */
+esp_err_t esp_io_expander_process_irq(esp_io_expander_handle_t handle)
+{
+    return (handle && handle->mask) ? handle->process(handle) : ESP_OK;
+}
+
+
+/**
+ * @brief Attach interrupt handler
+ *
+ * @param handle  : IO Expander handle
+ * @param pin     : expander IO pin num
+ * @param userFunc: callback method
+ *
+ * @return
+ *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+ *
+ */
+esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint8_t pin, voidIOExpanderCB userFunc, void* arg, int intr_type)
+{
+    if (pin < IO_COUNT_MAX && handle->pinIOExpanderISRs != NULL) {
+        handle->pinIOExpanderISRs[pin].fn = userFunc;
+        handle->pinIOExpanderISRs[pin].mode = intr_type;
+        handle->pinIOExpanderISRs[pin].arg = arg;
+        handle->pinIOExpanderISRs[pin].functional = true;
+        handle->mask |= (1 << pin);
+        return ESP_OK;
+    }
+    else
+        return ESP_FAIL;
+}
+
+
+/**
+ * @brief Detach interrupt handler
+ *
+ * @param handle  : IO Expander handle
+ * @param pin     : pin num with type of `esp_io_expander_pin_num_t`
+ *
+ * @return
+ *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+ *
+ */esp_err_t esp_io_expander_detach_interrupt(esp_io_expander_handle_t handle, uint8_t pin)
+{
+    if (pin < IO_COUNT_MAX && handle->pinIOExpanderISRs[pin].functional) {
+        handle->pinIOExpanderISRs[pin].fn = NULL;
+        handle->pinIOExpanderISRs[pin].arg = NULL;
+        handle->pinIOExpanderISRs[pin].functional = false;
+        handle->mask &= ~(1 << pin);
+        return ESP_OK;
+    }
+    else
+        return ESP_FAIL;
 }

@@ -77,6 +77,19 @@ typedef enum {
     IO_EXPANDER_OUTPUT,         /*!< Output dircetion */
 } esp_io_expander_dir_t;
 
+
+typedef void (*voidIOExpanderCB)(void*);
+typedef void (*voidIOExpanderISRHandler)(void*);
+
+typedef struct {
+    voidIOExpanderCB fn;
+    void* arg;
+    int mode;         // trigger on low(0x00)/falling(0x02) or high/rising(0x01)
+    bool trigger;     // flag if isr has been processed
+    bool functional;  // flag if isr is setup
+} ISRHandle_t;
+
+
 /**
  * @brief IO Expander Configuration Type
  *
@@ -188,6 +201,26 @@ struct esp_io_expander_s {
     esp_err_t (*del)(esp_io_expander_handle_t handle);
 
     /**
+     * @brief process interrupts (mandatory)
+     *
+     * @param handle: IO Expander handle
+     *
+     * @return
+     *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+     */
+    esp_err_t (*process)(esp_io_expander_handle_t handle);
+
+    /**
+     * @brief ISR handler table for all input pins (optional)
+     */
+    ISRHandle_t* pinIOExpanderISRs;
+
+    /**
+     * @brief mask of functional ISRs (=> 0 means not ISR attached)
+     */
+    uint32_t mask;
+
+    /**
      * @brief Configuration structure
      */
     esp_io_expander_config_t config;
@@ -264,6 +297,56 @@ esp_err_t esp_io_expander_reset(esp_io_expander_handle_t handle);
  *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
  */
 esp_err_t esp_io_expander_del(esp_io_expander_handle_t handle);
+
+/**
+ * @brief Setup IO IRQ
+ *
+ * @param handle  : IO Expander handle
+ * @param pin     : IO expander IRQ GPIO pin
+ * @param userFunc: callback method
+ *
+ * @return
+ *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+ *
+ */
+esp_err_t esp_io_expander_setup_IRQ(esp_io_expander_handle_t handle, voidIOExpanderISRHandler cb, uint8_t pin, int mode);
+
+/**
+ * @brief Attach interrupt handler callback
+ *
+ * @param handle  : IO Expander handle
+ * @param pin     : pin num
+ * @param isr     : isr handler
+ *
+ * @return
+ *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+ *
+ */
+esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint8_t pin, voidIOExpanderCB userFunc, void* arg, int intr_type);
+
+/**
+ * @brief Detach interrupt handler
+ *
+ * @param handle  : IO Expander handle
+ * @param pin     : pin num
+ *
+ * @return
+ *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+ *
+ */
+esp_err_t esp_io_expander_detach_interrupt(esp_io_expander_handle_t handle, uint8_t pin);
+
+/**
+ * @brief process irq(-callbacks); need to be periodically called
+ * 
+ * @param handle  : IO Expander handle
+ *
+ * @return
+ *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
+ *
+ */
+esp_err_t esp_io_expander_process_irq(esp_io_expander_handle_t handle);
+
 
 #ifdef __cplusplus
 }

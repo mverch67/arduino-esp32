@@ -54,6 +54,73 @@ static esp_err_t read_direction_reg(esp_io_expander_handle_t handle, uint32_t *v
 static esp_err_t reset(esp_io_expander_t *handle);
 static esp_err_t del(esp_io_expander_t *handle);
 
+static volatile bool irq_flag = false;
+
+/**
+ * isr handler to set a flag that some input bits have changed.
+ * The processing task will process the bits run the related callbacks
+ */
+static void io_expander_isr_handler(void *arg)
+{
+    irq_flag = true;
+}
+
+#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
+#define BYTE_TO_BINARY(byte)  \
+  ((byte) & 0x80 ? '1' : '0'), \
+  ((byte) & 0x40 ? '1' : '0'), \
+  ((byte) & 0x20 ? '1' : '0'), \
+  ((byte) & 0x10 ? '1' : '0'), \
+  ((byte) & 0x08 ? '1' : '0'), \
+  ((byte) & 0x04 ? '1' : '0'), \
+  ((byte) & 0x02 ? '1' : '0'), \
+  ((byte) & 0x01 ? '1' : '0') 
+
+
+static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handle_t handle)
+{
+    if (!irq_flag || handle->mask == 0) return ESP_OK;
+    irq_flag = false;
+    uint32_t value = 0;
+
+    esp_err_t err = handle->read_input_reg(handle, &value);
+    if (err != ESP_OK) {
+        log_e("failed to aquire isr pins: %d", err);
+        return err;
+    }
+
+    //log_d("processing callbacks... pin mask="BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(value & 0xff));
+
+    if (value) {
+        for (int i=0; i<IO_COUNT; i++) {
+            if (handle->pinIOExpanderISRs[i].functional) {
+                if (handle->pinIOExpanderISRs[i].mode == 0x01 || handle->pinIOExpanderISRs[i].mode == 0x05) {
+                    if ((value & (1 << i)) != 0 && !handle->pinIOExpanderISRs[i].trigger) {
+                        log_d("IRQ pin rising/high %d", i);
+                        (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
+                        //handle->pinIOExpanderISRs[i].trigger = true;
+                    }
+                    else
+                        handle->pinIOExpanderISRs[i].trigger = false;
+                }
+                else if (handle->pinIOExpanderISRs[i].mode == 0x02 || handle->pinIOExpanderISRs[i].mode == 0x04 ) {
+                    if ((value & (1 << i)) == 0 && !handle->pinIOExpanderISRs[i].trigger) {
+                        log_d("IRQ pin falling/low %d", i);
+                        (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
+                        //handle->pinIOExpanderISRs[i].trigger = true;
+                    }
+                }
+                else
+                    handle->pinIOExpanderISRs[i].trigger = false;
+            }
+        }
+    }
+    else {
+        log_d("io_expander_isr_handler: nothing to do!");
+    }
+    return ESP_OK;
+}
+
 esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_port_t i2c_num, uint32_t i2c_address, esp_io_expander_handle_t *handle)
 {
     log_d("io expander init i2c(%d:0x%02x)", i2c_num, i2c_address);
@@ -72,14 +139,19 @@ esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_port_t i2c_num, uint32_t i2c
     tca->base.read_output_reg = read_output_reg;
     tca->base.write_direction_reg = write_direction_reg;
     tca->base.read_direction_reg = read_direction_reg;
-    tca->base.del = del;
     tca->base.reset = reset;
+    tca->base.del = del;
+    tca->base.process = esp_io_expander_process_irq_tca95xx_16bit;
+    tca->base.pinIOExpanderISRs = NULL;
+    tca->base.mask = 0;
 
     esp_err_t ret = ESP_OK;
     /* Reset configuration and register status */
     ESP_GOTO_ON_ERROR(reset(&tca->base), err, TAG, "Reset failed");
 
     *handle = &tca->base;
+
+    esp_io_expander_setup_IRQ(*handle, io_expander_isr_handler, IO_EXPANDER_IRQ, 0x02 /*FALLING*/);
     return ESP_OK;
 err:
     free(tca);

@@ -79,6 +79,10 @@ void attachInterrupt(uint8_t pin, void (*)(void), int mode);
 void attachInterruptArg(uint8_t pin, void (*)(void*), void * arg, int mode);
 void detachInterrupt(uint8_t pin);
 
+#ifdef IO_EXPANDER
+void pollInterrupt(void);
+#endif
+
 int8_t digitalPinToTouchChannel(uint8_t pin);
 int8_t digitalPinToAnalogChannel(uint8_t pin);
 int8_t analogChannelToDigitalPin(uint8_t channel);

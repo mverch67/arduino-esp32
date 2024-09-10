@@ -102,8 +102,12 @@ static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handl
                 }
             }
             else if (handle->pinIOExpanderISRs[i].mode == GPIO_INTR_ANYEDGE) {
-                log_d("IRQ pin anyedge %d", i);
-                trigger = true;
+                static int previous = 0;
+                if ((value & (1 << i)) != previous) {
+                    previous = value & (1 << i);
+                    log_d("IRQ pin anyedge %d", i);
+                    trigger = true;
+                }
             }
 
             if (trigger) {

@@ -44,9 +44,11 @@ static i2c_bus_t bus[SOC_I2C_NUM];
 
 
 #ifdef IO_EXPANDER
-static void prvPollISRTimerCallback(void* arg)
+static void prvProcessISRCallback(void* arg)
 {
-    esp_io_expander_process_irq(io_expander);
+    while (true) {
+        esp_io_expander_process_irq(io_expander);
+    }
 }
 #endif
 
@@ -119,9 +121,9 @@ esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency){
     if (!io_expander) {
         log_i("esp_io_expander_new_i2c_tca95xx_16bit(%d,%02x)", i2c_num, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000);
         esp_io_expander_new_i2c_tca95xx_16bit(i2c_num, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000, &io_expander);
-        // create a timer task that polls the IO_INT and processes all attached interrupts
-        TimerHandle_t xAutoReloadTimer = xTimerCreate("IOExpander", pdMS_TO_TICKS(50), pdTRUE, 0, prvPollISRTimerCallback);
-        xTimerStart(xAutoReloadTimer,  pdMS_TO_TICKS(5000));
+        // create a task that waits for the IO_INT and processes all changed input pins that have attachedInterrupt
+        static TaskHandle_t xHandle = NULL;
+        xTaskCreate( prvProcessISRCallback, "IOExpander", 2048, NULL, tskIDLE_PRIORITY, &xHandle);
     }
 #endif
     return ret;

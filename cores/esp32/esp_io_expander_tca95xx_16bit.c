@@ -54,69 +54,67 @@ static esp_err_t read_direction_reg(esp_io_expander_handle_t handle, uint32_t *v
 static esp_err_t reset(esp_io_expander_t *handle);
 static esp_err_t del(esp_io_expander_t *handle);
 
-static volatile bool irq_flag = false;
+static TaskHandle_t *xTaskToNotify = NULL;
 
 /**
- * isr handler to set a flag that some input bits have changed.
- * The processing task will process the bits run the related callbacks
+ * @brief isr handler to notify a waiting task that some input bits have changed.
+ *        The processing task will process the bits and run the related callbacks
  */
 static void io_expander_isr_handler(void *arg)
 {
-    irq_flag = true;
+    if (xTaskToNotify) {
+        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        vTaskNotifyGiveFromISR(xTaskToNotify, &xHigherPriorityTaskWoken);
+        xTaskToNotify = NULL;
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
 }
 
-#define BYTE_TO_BINARY_PATTERN "%c%c%c%c%c%c%c%c"
-#define BYTE_TO_BINARY(byte)  \
-  ((byte) & 0x80 ? '1' : '0'), \
-  ((byte) & 0x40 ? '1' : '0'), \
-  ((byte) & 0x20 ? '1' : '0'), \
-  ((byte) & 0x10 ? '1' : '0'), \
-  ((byte) & 0x08 ? '1' : '0'), \
-  ((byte) & 0x04 ? '1' : '0'), \
-  ((byte) & 0x02 ? '1' : '0'), \
-  ((byte) & 0x01 ? '1' : '0') 
-
-
+/**
+ * @brief Processing routine that will wait for notification from ISR and read the io expander input bits
+ */
 static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handle_t handle)
 {
-    if (!irq_flag || handle->mask == 0) return ESP_OK;
-    irq_flag = false;
-    uint32_t value = 0;
+    xTaskToNotify = xTaskGetCurrentTaskHandle();
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+    log_d("reading input pins");
+    uint32_t value = 0;
     esp_err_t err = handle->read_input_reg(handle, &value);
     if (err != ESP_OK) {
-        log_e("failed to aquire isr pins: %d", err);
+        log_e("failed to read input pins: %d", err);
         return err;
     }
 
-    //log_d("processing callbacks... pin mask="BYTE_TO_BINARY_PATTERN, BYTE_TO_BINARY(value & 0xff));
-
-    if (value) {
-        for (int i=0; i<IO_COUNT; i++) {
-            if (handle->pinIOExpanderISRs[i].functional) {
-                if (handle->pinIOExpanderISRs[i].mode == 0x01 || handle->pinIOExpanderISRs[i].mode == 0x05) {
-                    if ((value & (1 << i)) != 0 && !handle->pinIOExpanderISRs[i].trigger) {
-                        log_d("IRQ pin rising/high %d", i);
-                        (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
-                        //handle->pinIOExpanderISRs[i].trigger = true;
-                    }
-                    else
-                        handle->pinIOExpanderISRs[i].trigger = false;
-                }
-                else if (handle->pinIOExpanderISRs[i].mode == 0x02 || handle->pinIOExpanderISRs[i].mode == 0x04 ) {
-                    if ((value & (1 << i)) == 0 && !handle->pinIOExpanderISRs[i].trigger) {
-                        log_d("IRQ pin falling/low %d", i);
-                        (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
-                        //handle->pinIOExpanderISRs[i].trigger = true;
-                    }
+    if (handle->mask == 0) return ESP_OK;
+    for (int i=0; i<IO_COUNT; i++) {
+        if (handle->pinIOExpanderISRs[i].functional) {
+            if (handle->pinIOExpanderISRs[i].mode == 0x01 || handle->pinIOExpanderISRs[i].mode == 0x05) {
+                if ((value & (1 << i)) != 0 && !handle->pinIOExpanderISRs[i].trigger) {
+                    log_d("IRQ pin rising/high %d", i);
+                    (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
+                    //handle->pinIOExpanderISRs[i].trigger = true;
                 }
                 else
                     handle->pinIOExpanderISRs[i].trigger = false;
             }
+            else if (handle->pinIOExpanderISRs[i].mode == 0x03 || handle->pinIOExpanderISRs[i].mode == 0x04) {
+                if ((value & (1 << i)) == 0 && !handle->pinIOExpanderISRs[i].trigger) {
+                    log_d("IRQ pin falling/low %d", i);
+                    (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
+                    //handle->pinIOExpanderISRs[i].trigger = true;
+                }
+            }
+            else if (handle->pinIOExpanderISRs[i].mode == 0x03) {
+                if (!handle->pinIOExpanderISRs[i].trigger) {
+                    log_d("IRQ pin anyedge %d", i);
+                    (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
+                    //handle->pinIOExpanderISRs[i].trigger = true;
+                }
+            }
+            else
+                handle->pinIOExpanderISRs[i].trigger = false;
         }
-    }
-    else {
-        log_d("io_expander_isr_handler: nothing to do!");
     }
     return ESP_OK;
 }

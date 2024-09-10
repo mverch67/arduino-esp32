@@ -85,7 +85,6 @@ typedef struct {
     voidIOExpanderCB fn;
     void* arg;
     int mode;         // trigger on low(0x00)/falling(0x02) or high/rising(0x01)
-    bool trigger;     // flag if isr has been processed
     bool functional;  // flag if isr is setup
 } ISRHandle_t;
 

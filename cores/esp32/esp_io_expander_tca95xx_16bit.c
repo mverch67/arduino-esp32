@@ -17,7 +17,7 @@
 #include "esp_io_expander_tca95xx_16bit.h"
 
 /* Timeout of each I2C communication */
-#define I2C_TIMEOUT_MS          (10)
+#define I2C_TIMEOUT_MS          (50)
 
 #define IO_COUNT                (16)
 
@@ -78,7 +78,6 @@ static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handl
     xTaskToNotify = xTaskGetCurrentTaskHandle();
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    log_d("reading input pins");
     uint32_t value = 0;
     esp_err_t err = handle->read_input_reg(handle, &value);
     if (err != ESP_OK) {
@@ -89,31 +88,27 @@ static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handl
     if (handle->mask == 0) return ESP_OK;
     for (int i=0; i<IO_COUNT; i++) {
         if (handle->pinIOExpanderISRs[i].functional) {
-            if (handle->pinIOExpanderISRs[i].mode == 0x01 || handle->pinIOExpanderISRs[i].mode == 0x05) {
-                if ((value & (1 << i)) != 0 && !handle->pinIOExpanderISRs[i].trigger) {
+            bool trigger = false;
+            if (handle->pinIOExpanderISRs[i].mode == GPIO_INTR_POSEDGE || handle->pinIOExpanderISRs[i].mode == GPIO_INTR_HIGH_LEVEL) {
+                if ((value & (1 << i)) != 0) {
                     log_d("IRQ pin rising/high %d", i);
-                    (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
-                    //handle->pinIOExpanderISRs[i].trigger = true;
+                    trigger = true;
                 }
-                else
-                    handle->pinIOExpanderISRs[i].trigger = false;
             }
-            else if (handle->pinIOExpanderISRs[i].mode == 0x03 || handle->pinIOExpanderISRs[i].mode == 0x04) {
-                if ((value & (1 << i)) == 0 && !handle->pinIOExpanderISRs[i].trigger) {
+            else if (handle->pinIOExpanderISRs[i].mode == GPIO_INTR_NEGEDGE || handle->pinIOExpanderISRs[i].mode == GPIO_INTR_LOW_LEVEL) {
+                if ((value & (1 << i)) == 0) {
                     log_d("IRQ pin falling/low %d", i);
-                    (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
-                    //handle->pinIOExpanderISRs[i].trigger = true;
+                    trigger = true;
                 }
             }
-            else if (handle->pinIOExpanderISRs[i].mode == 0x03) {
-                if (!handle->pinIOExpanderISRs[i].trigger) {
-                    log_d("IRQ pin anyedge %d", i);
-                    (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
-                    //handle->pinIOExpanderISRs[i].trigger = true;
-                }
+            else if (handle->pinIOExpanderISRs[i].mode == GPIO_INTR_ANYEDGE) {
+                log_d("IRQ pin anyedge %d", i);
+                trigger = true;
             }
-            else
-                handle->pinIOExpanderISRs[i].trigger = false;
+
+            if (trigger) {
+                (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
+            }
         }
     }
     return ESP_OK;
@@ -149,7 +144,7 @@ esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_port_t i2c_num, uint32_t i2c
 
     *handle = &tca->base;
 
-    esp_io_expander_setup_IRQ(*handle, io_expander_isr_handler, IO_EXPANDER_IRQ, 0x02 /*FALLING*/);
+    esp_io_expander_setup_IRQ(*handle, io_expander_isr_handler, IO_EXPANDER_IRQ, GPIO_INTR_NEGEDGE);
     return ESP_OK;
 err:
     free(tca);

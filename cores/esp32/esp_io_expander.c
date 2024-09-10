@@ -234,8 +234,6 @@ static esp_err_t read_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint3
 }
 
 
-
-
 /**
  * @brief Setup IO IRQ
  *
@@ -268,7 +266,8 @@ esp_err_t esp_io_expander_setup_IRQ(esp_io_expander_handle_t handle, voidIOExpan
 }
 
 /**
- * @brief process interrupts (mandatory if ISRs attached)
+ * @brief process interrupts
+ *        Needs to called by e.g. a task that communicates with the ISR handler
  *
  * @param handle: IO Expander handle
  */
@@ -279,20 +278,22 @@ esp_err_t esp_io_expander_process_irq(esp_io_expander_handle_t handle)
 
 
 /**
- * @brief Attach interrupt handler
+ * @brief Attach interrupt handler callback
  *
- * @param handle  : IO Expander handle
- * @param pin     : expander IO pin num
- * @param userFunc: callback method
+ * @param handle   : IO Expander handle
+ * @param pin      : IO expander IRQ GPIO pin
+ * @param cb       : interrupt callback handler to be triggert
+ * @param arg      : parameter to interrupt callback handler
+ * @param intr_type: defines when the interrupt should be triggered (see above)
  *
  * @return
  *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
  *
  */
-esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint8_t pin, voidIOExpanderCB userFunc, void* arg, int intr_type)
+esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint8_t pin, voidIOExpanderCB cb, void* arg, int intr_type)
 {
     if (pin < IO_COUNT_MAX && handle->pinIOExpanderISRs != NULL) {
-        handle->pinIOExpanderISRs[pin].fn = userFunc;
+        handle->pinIOExpanderISRs[pin].fn = cb;
         handle->pinIOExpanderISRs[pin].mode = intr_type;
         handle->pinIOExpanderISRs[pin].arg = arg;
         handle->pinIOExpanderISRs[pin].functional = true;
@@ -317,6 +318,7 @@ esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint
 {
     if (pin < IO_COUNT_MAX && handle->pinIOExpanderISRs[pin].functional) {
         handle->pinIOExpanderISRs[pin].fn = NULL;
+        handle->pinIOExpanderISRs[pin].mode = 0;
         handle->pinIOExpanderISRs[pin].arg = NULL;
         handle->pinIOExpanderISRs[pin].functional = false;
         handle->mask &= ~(1 << pin);

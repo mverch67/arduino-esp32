@@ -302,8 +302,15 @@ esp_err_t esp_io_expander_del(esp_io_expander_handle_t handle);
  * @brief Setup IO IRQ
  *
  * @param handle  : IO Expander handle
+ * @param cb      : callback method
  * @param pin     : IO expander IRQ GPIO pin
- * @param userFunc: callback method
+ * @param mode    : defines when the interrupt should be triggered
+ *   GPIO_INTR_DISABLE = 0,     Disable GPIO interrupt
+ *   GPIO_INTR_POSEDGE = 1,     GPIO interrupt type : rising edge
+ *   GPIO_INTR_NEGEDGE = 2,     GPIO interrupt type : falling edge
+ *   GPIO_INTR_ANYEDGE = 3,     GPIO interrupt type : both rising and falling edge
+ *   GPIO_INTR_LOW_LEVEL = 4,   GPIO interrupt type : input low level trigger
+ *   GPIO_INTR_HIGH_LEVEL = 5,  GPIO interrupt type : input high level trigger
  *
  * @return
  *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
@@ -314,15 +321,17 @@ esp_err_t esp_io_expander_setup_IRQ(esp_io_expander_handle_t handle, voidIOExpan
 /**
  * @brief Attach interrupt handler callback
  *
- * @param handle  : IO Expander handle
- * @param pin     : pin num
- * @param isr     : isr handler
+ * @param handle   : IO Expander handle
+ * @param pin      : IO expander IRQ GPIO pin
+ * @param cb       : interrupt callback handler to be triggert
+ * @param arg      : parameter to interrupt callback handler
+ * @param intr_type: defines when the interrupt should be triggered (see above)
  *
  * @return
  *      - ESP_OK: Success, otherwise returns ESP_ERR_xxx
  *
  */
-esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint8_t pin, voidIOExpanderCB userFunc, void* arg, int intr_type);
+esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint8_t pin, voidIOExpanderCB cb, void* arg, int intr_type);
 
 /**
  * @brief Detach interrupt handler

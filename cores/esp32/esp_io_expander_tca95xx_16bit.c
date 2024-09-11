@@ -63,7 +63,7 @@ static TaskHandle_t *xTaskToNotify = NULL;
 static void io_expander_isr_handler(void *arg)
 {
     if (xTaskToNotify) {
-        BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+        BaseType_t xHigherPriorityTaskWoken = pdTRUE;
         vTaskNotifyGiveFromISR(xTaskToNotify, &xHigherPriorityTaskWoken);
         xTaskToNotify = NULL;
         portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
@@ -78,13 +78,24 @@ static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handl
     xTaskToNotify = xTaskGetCurrentTaskHandle();
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
+    // read io expander registers with retries if there's a timeout
     uint32_t value = 0;
-    esp_err_t err = handle->read_input_reg(handle, &value);
-    if (err != ESP_OK) {
-        log_e("failed to read input pins: %d", err);
-        return err;
+    uint32_t count = 0;
+    esp_err_t err = ESP_OK;
+    do {
+        err = handle->read_input_reg(handle, &value);
+        if (err != ESP_OK) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+        }
     }
-
+    while (err != ESP_OK && count++ < 20);
+    if (err != ESP_OK) {
+         log_e("failed to read input pins, giving up: %d", err);
+         return err;
+    }
+    else if (count > 1)
+         log_d("succeeded to read input pins after %d attempts", count);
+ 
     if (handle->mask == 0) return ESP_OK;
     for (int i=0; i<IO_COUNT; i++) {
         if (handle->pinIOExpanderISRs[i].functional) {
@@ -160,11 +171,14 @@ static esp_err_t read_input_reg(esp_io_expander_handle_t handle, uint32_t *value
     esp_io_expander_tca95xx_16bit_t *tca = (esp_io_expander_tca95xx_16bit_t *)__containerof(handle, esp_io_expander_tca95xx_16bit_t, base);
 
     uint8_t temp[2] = {0, 0};
-    // *INDENT-OFF*
-    ESP_RETURN_ON_ERROR(
-        i2c_master_write_read_device(tca->i2c_num, tca->i2c_address, (uint8_t[]){INPUT_REG_ADDR}, 1, (uint8_t*)&temp, 2, pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
-        TAG, "Read input reg failed");
-    // *INDENT-ON*
+    esp_err_t err_rc = i2c_master_write_read_device(tca->i2c_num, tca->i2c_address, (uint8_t[]){INPUT_REG_ADDR}, 1, (uint8_t*)&temp, 2, pdMS_TO_TICKS(I2C_TIMEOUT_MS));
+    if (err_rc != ESP_OK) {
+        // do a retry if read fails
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ESP_RETURN_ON_ERROR(
+            i2c_master_write_read_device(tca->i2c_num, tca->i2c_address, (uint8_t[]){INPUT_REG_ADDR}, 1, (uint8_t*)&temp, 2, pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+            TAG, "Read input reg failed");
+    }
     *value = (((uint32_t)temp[1]) << 8) | (temp[0]);
     //log_d("i2c read values=%u %u", (uint16_t)temp[0], (uint16_t)temp[1]);
     return ESP_OK;
@@ -177,9 +191,14 @@ static esp_err_t write_output_reg(esp_io_expander_handle_t handle, uint32_t valu
 
     uint8_t data[] = {OUTPUT_REG_ADDR, value & 0xff, value >> 8};
     //log_d("i2c(%d:0x%02x) write values: %u %u %u", tca->i2c_num, tca->i2c_address, data[0], data[1], data[2]);
-    ESP_RETURN_ON_ERROR(
-        i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
-        TAG, "Write output reg failed");
+    esp_err_t err_rc = i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS));
+    if (err_rc != ESP_OK) {
+        // do a retry if write fails
+        vTaskDelay(pdMS_TO_TICKS(10));
+        ESP_RETURN_ON_ERROR(
+            i2c_master_write_to_device(tca->i2c_num, tca->i2c_address, data, sizeof(data), pdMS_TO_TICKS(I2C_TIMEOUT_MS)),
+            TAG, "Write output reg failed");
+    }
     tca->regs.output = value;
     return ESP_OK;
 }

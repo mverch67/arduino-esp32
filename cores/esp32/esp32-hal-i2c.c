@@ -122,8 +122,7 @@ esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency){
         log_i("esp_io_expander_new_i2c_tca95xx_16bit(%d,%02x)", i2c_num, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000);
         esp_io_expander_new_i2c_tca95xx_16bit(i2c_num, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000, &io_expander);
         // create a task that waits for the IO_INT and processes all changed input pins that have attachedInterrupt
-        static TaskHandle_t xHandle = NULL;
-        xTaskCreate(prvProcessISRCallback, "IOExpander", 2048, NULL, 1, &xHandle);
+        xTaskCreatePinnedToCore(prvProcessISRCallback, "IOExpander", 2048, NULL, 1, NULL, 1);
     }
 #endif
     return ret;

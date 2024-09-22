@@ -63,6 +63,7 @@ static TaskHandle_t *xTaskToNotify = NULL;
 static void io_expander_isr_handler(void *arg)
 {
     if (xTaskToNotify) {
+        log_d("IRQ!");
         BaseType_t xHigherPriorityTaskWoken = pdTRUE;
         vTaskNotifyGiveFromISR(xTaskToNotify, &xHigherPriorityTaskWoken);
         xTaskToNotify = NULL;
@@ -78,24 +79,13 @@ static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handl
     xTaskToNotify = xTaskGetCurrentTaskHandle();
     ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
 
-    // read io expander registers with retries if there's a timeout
     uint32_t value = 0;
-    uint32_t count = 0;
-    esp_err_t err = ESP_OK;
-    do {
-        err = handle->read_input_reg(handle, &value);
-        if (err != ESP_OK) {
-            vTaskDelay(pdMS_TO_TICKS(10));
-        }
-    }
-    while (err != ESP_OK && count++ < 20);
+    esp_err_t err = handle->read_input_reg(handle, &value);
     if (err != ESP_OK) {
-         log_e("failed to read input pins, giving up: %d", err);
-         return err;
+        log_e("failed to read input pins: %d", err);
+        return err;
     }
-    else if (count > 1)
-         log_d("succeeded to read input pins after %d attempts", count);
- 
+
     if (handle->mask == 0) return ESP_OK;
     for (int i=0; i<IO_COUNT; i++) {
         if (handle->pinIOExpanderISRs[i].functional) {

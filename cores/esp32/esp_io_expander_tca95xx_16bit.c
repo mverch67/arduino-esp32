@@ -54,6 +54,7 @@ static esp_err_t read_direction_reg(esp_io_expander_handle_t handle, uint32_t *v
 static esp_err_t reset(esp_io_expander_t *handle);
 static esp_err_t del(esp_io_expander_t *handle);
 
+#ifdef IO_EXPANDER_IRQ
 static TaskHandle_t *xTaskToNotify = NULL;
 
 /**
@@ -118,6 +119,7 @@ static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handl
     }
     return ESP_OK;
 }
+#endif
 
 esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_port_t i2c_num, uint32_t i2c_address, esp_io_expander_handle_t *handle)
 {
@@ -139,7 +141,11 @@ esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_port_t i2c_num, uint32_t i2c
     tca->base.read_direction_reg = read_direction_reg;
     tca->base.reset = reset;
     tca->base.del = del;
+#ifdef IO_EXPANDER_IRQ
     tca->base.process = esp_io_expander_process_irq_tca95xx_16bit;
+#else
+    tca->base.process = NULL;
+#endif
     tca->base.pinIOExpanderISRs = NULL;
     tca->base.mask = 0;
 
@@ -149,7 +155,9 @@ esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_port_t i2c_num, uint32_t i2c
 
     *handle = &tca->base;
 
+#ifdef IO_EXPANDER_IRQ
     esp_io_expander_setup_IRQ(*handle, io_expander_isr_handler, IO_EXPANDER_IRQ, GPIO_INTR_NEGEDGE);
+#endif
     return ESP_OK;
 err:
     free(tca);

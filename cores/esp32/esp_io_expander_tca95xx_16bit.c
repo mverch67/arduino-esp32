@@ -61,10 +61,11 @@ static TaskHandle_t *xTaskToNotify = NULL;
  * @brief isr handler to notify a waiting task that some input bits have changed.
  *        The processing task will process the bits and run the related callbacks
  */
+IRAM_ATTR
 static void io_expander_isr_handler(void *arg)
 {
     if (xTaskToNotify) {
-        log_d("IRQ!");
+        //log_d("IRQ!");
         BaseType_t xHigherPriorityTaskWoken = pdTRUE;
         vTaskNotifyGiveFromISR(xTaskToNotify, &xHigherPriorityTaskWoken);
         xTaskToNotify = NULL;

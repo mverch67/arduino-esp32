@@ -61,8 +61,8 @@ static TaskHandle_t *xTaskToNotify = NULL;
  * @brief isr handler to notify a waiting task that some input bits have changed.
  *        The processing task will process the bits and run the related callbacks
  */
-IRAM_ATTR
-static void io_expander_isr_handler(void *arg)
+
+static void IRAM_ATTR io_expander_isr_handler(void *arg)
 {
     if (xTaskToNotify) {
         //log_d("IRQ!");
@@ -79,7 +79,13 @@ static void io_expander_isr_handler(void *arg)
 static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handle_t handle)
 {
     xTaskToNotify = xTaskGetCurrentTaskHandle();
-    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    
+    if( gpio_get_level((gpio_num_t)IO_EXPANDER_IRQ) ) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    } else {
+        //The INT pin remains at a low level, the interrupt is not cleared, and the input register needs to be read again.
+        ulTaskNotifyTake(pdTRUE, 0);
+    }
 
     uint32_t value = 0;
     esp_err_t err = handle->read_input_reg(handle, &value);

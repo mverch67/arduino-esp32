@@ -29,6 +29,19 @@
 #include "driver/i2c_master.h"
 #include "esp32-hal-periman.h"
 
+#ifdef IO_EXPANDER
+#include "esp_io_expander_tca95xx_16bit.h"
+extern esp_io_expander_handle_t io_expander;
+
+static void prvProcessISRCallback(void* arg)
+{
+    while (true) {
+        esp_io_expander_process_irq(io_expander);
+        vTaskDelay(5);
+    }
+}
+#endif
+
 typedef volatile struct {
   bool initialized;
   uint32_t frequency;
@@ -155,6 +168,14 @@ esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency) {
       return ESP_FAIL;
     }
   }
+#ifdef IO_EXPANDER
+  if (!io_expander) {
+      log_i("esp_io_expander_new_i2c_tca95xx_16bit(%d,%02x)", i2c_num, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000);
+      esp_io_expander_new_i2c_tca95xx_16bit(bus[i2c_num].bus_handle, ESP_IO_EXPANDER_I2C_TCA9555_ADDRESS_000, &io_expander);
+      // create a task that waits for the IO_INT and processes all changed input pins that have attachedInterrupt
+      xTaskCreatePinnedToCore(prvProcessISRCallback, "IOExpander", 2048, NULL, 2, NULL, 1);
+  }
+#endif
 
 init_fail:
 #if !CONFIG_DISABLE_HAL_LOCKS
@@ -225,7 +246,7 @@ static esp_err_t i2cAddDeviceIfNeeded(uint8_t i2c_num, uint16_t address) {
       log_e("i2c_master_bus_add_device failed: [%d] %s", ret, esp_err_to_name(ret));
     } else {
       bus[i2c_num].dev_handles[address] = dev_handle;
-      log_v("added device: bus=%u addr=0x%x handle=0x%08x", i2c_num, address, dev_handle);
+      log_i("added device: bus=%u addr=0x%x handle=0x%08x", i2c_num, address, dev_handle);
     }
   }
   return ret;
@@ -266,7 +287,7 @@ esp_err_t i2cWrite(uint8_t i2c_num, uint16_t address, const uint8_t *buff, size_
       goto end;
     }
 
-    log_v("i2c_master_transmit: bus=%u addr=0x%x handle=0x%08x size=%u", i2c_num, address, bus[i2c_num].dev_handles[address], size);
+    log_d("i2c_master_transmit: bus=%u addr=0x%x handle=0x%08x size=%u", i2c_num, address, bus[i2c_num].dev_handles[address], size);
     ret = i2c_master_transmit(bus[i2c_num].dev_handles[address], buff, size, timeOutMillis);
     if (ret != ESP_OK) {
       log_e("i2c_master_transmit failed: [%d] %s", ret, esp_err_to_name(ret));
@@ -312,7 +333,7 @@ esp_err_t i2cRead(uint8_t i2c_num, uint16_t address, uint8_t *buff, size_t size,
     goto end;
   }
 
-  log_v("i2c_master_receive: bus=%u addr=0x%x handle=0x%08x size=%u", i2c_num, address, bus[i2c_num].dev_handles[address], size);
+  log_d("i2c_master_receive: bus=%u addr=0x%x handle=0x%08x size=%u", i2c_num, address, bus[i2c_num].dev_handles[address], size);
   ret = i2c_master_receive(bus[i2c_num].dev_handles[address], buff, size, timeOutMillis);
   if (ret != ESP_OK) {
     log_e("i2c_master_receive failed: [%d] %s", ret, esp_err_to_name(ret));
@@ -360,7 +381,7 @@ esp_err_t i2cWriteReadNonStop(
     goto end;
   }
 
-  log_v("i2c_master_transmit_receive: bus=%u addr=0x%x handle=0x%08x write=%u read=%u", i2c_num, address, bus[i2c_num].dev_handles[address], wsize, rsize);
+  log_d("i2c_master_transmit_receive: bus=%u addr=0x%x handle=0x%08x write=%u read=%u", i2c_num, address, bus[i2c_num].dev_handles[address], wsize, rsize);
   ret = i2c_master_transmit_receive(bus[i2c_num].dev_handles[address], wbuff, wsize, rbuff, rsize, timeOutMillis);
   if (ret != ESP_OK) {
     log_e("i2c_master_transmit_receive failed: [%d] %s", ret, esp_err_to_name(ret));

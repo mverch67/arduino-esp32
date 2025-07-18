@@ -12,7 +12,6 @@
 #include "esp_log.h"
 #include "esp_io_expander.h"
 #include "esp_io_expander_tca95xx_16bit.h"
-#include "private/esp_expander_utils.h"
 
 /* I2C communication related */
 #define I2C_TIMEOUT_MS          (1000)

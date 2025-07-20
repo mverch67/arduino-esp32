@@ -105,6 +105,7 @@ static bool gpioDetachBus(void *bus) {
 }
 
 extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode) {
+  log_d("pinmode IO %i mode %d", pin, mode);
 #ifdef RGB_BUILTIN
   if (pin == RGB_BUILTIN) {
     __pinMode(RGB_BUILTIN - SOC_GPIO_PIN_COUNT, mode);
@@ -171,6 +172,7 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode) {
   }
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) == NULL) {
     if (!perimanSetPinBus(pin, ESP32_BUS_TYPE_GPIO, (void *)(pin + 1), -1, -1)) {
+      log_e("perimanSetPinBus IO %i failed", pin);
       //gpioDetachBus((void *)(pin+1));
       return;
     }
@@ -210,7 +212,8 @@ extern void ARDUINO_ISR_ATTR __digitalWrite(uint8_t pin, uint8_t val) {
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) != NULL) {
     gpio_set_level((gpio_num_t)pin, val);
   } else {
-    log_e("IO %i is not set as GPIO. Execute digitalMode(%i, OUTPUT) first.", pin, pin);
+    log_w("IO %i is not set as GPIO. Execute digitalMode(%i, OUTPUT) first.", pin, pin);
+    __pinMode(pin, OUTPUT);
   }
 }
 

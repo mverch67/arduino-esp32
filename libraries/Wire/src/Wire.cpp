@@ -274,6 +274,7 @@ end:
 
 // Master Begin
 bool TwoWire::begin(int sdaPin, int sclPin, uint32_t frequency) {
+  log_d("TwoWire::begin: sdaPin=%d, sclPin=%d, frequency=%u", sdaPin, sclPin, frequency);
   bool started = false;
   esp_err_t err = ESP_OK;
 #if !CONFIG_DISABLE_HAL_LOCKS

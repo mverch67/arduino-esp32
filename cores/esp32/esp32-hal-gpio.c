@@ -16,6 +16,9 @@
 #include "esp32-hal-periman.h"
 #include "hal/gpio_hal.h"
 #include "soc/soc_caps.h"
+#include "esp_io_expander_tca95xx_16bit.h"
+
+esp_io_expander_handle_t io_expander = NULL;
 
 // RGB_BUILTIN is defined in pins_arduino.h
 // If RGB_BUILTIN is defined, it will be used as a pin number for the RGB LED
@@ -102,6 +105,7 @@ static bool gpioDetachBus(void *bus) {
 }
 
 extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode) {
+  log_d("pinmode IO %i mode %d", pin, mode);
 #ifdef RGB_BUILTIN
   if (pin == RGB_BUILTIN) {
     __pinMode(RGB_BUILTIN - SOC_GPIO_PIN_COUNT, mode);
@@ -109,7 +113,25 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode) {
   }
 #endif
 
-  if (pin >= SOC_GPIO_PIN_COUNT) {
+#ifdef IO_EXPANDER
+    if (pin & IO_EXPANDER) {
+        if (!io_expander) {
+            log_e("io_expander not initialized");
+            return;
+        }
+        pin = pin & ~IO_EXPANDER;
+        esp_io_expander_dir_t io_mode = IO_EXPANDER_INPUT;
+        if (mode == OUTPUT)
+            io_mode = IO_EXPANDER_OUTPUT;
+#ifdef IO_EXPANDER_DEBUG
+        log_d("esp_io_expander_set_dir(IO%02d, %d)", pin, io_mode);
+#endif
+        esp_io_expander_set_dir(io_expander, 1 << pin , io_mode);
+        return;
+    }
+#endif
+
+  if (!GPIO_IS_VALID_GPIO(pin)) {
     log_e("Invalid IO %i selected", pin);
     return;
   }
@@ -150,6 +172,7 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode) {
   }
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) == NULL) {
     if (!perimanSetPinBus(pin, ESP32_BUS_TYPE_GPIO, (void *)(pin + 1), -1, -1)) {
+      log_e("perimanSetPinBus IO %i failed", pin);
       //gpioDetachBus((void *)(pin+1));
       return;
     }
@@ -170,14 +193,45 @@ extern void ARDUINO_ISR_ATTR __digitalWrite(uint8_t pin, uint8_t val) {
     return;
   }
 #endif  // RGB_BUILTIN
+
+#ifdef IO_EXPANDER
+    if (!io_expander) {
+       	log_e("io_expander not initialized)");
+        return;
+    }
+    if (pin & IO_EXPANDER) {
+        pin &= ~IO_EXPANDER;
+#ifdef IO_EXPANDER_DEBUG
+       	log_d("esp_io_expander_set_level(IO%02d --> %d)", pin, val);
+#endif
+        esp_io_expander_set_level(io_expander, 1 << pin, val);
+        return;
+    }
+#endif
+
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) != NULL) {
     gpio_set_level((gpio_num_t)pin, val);
   } else {
-    log_e("IO %i is not set as GPIO. Execute digitalMode(%i, OUTPUT) first.", pin, pin);
+    log_w("IO %i is not set as GPIO. Execute digitalMode(%i, OUTPUT) first.", pin, pin);
+    __pinMode(pin, OUTPUT);
   }
 }
 
 extern int ARDUINO_ISR_ATTR __digitalRead(uint8_t pin) {
+#ifdef IO_EXPANDER
+    if (!io_expander) {
+       	log_e("io_expander not initialized)");
+        return 0;
+    }
+    if (pin & IO_EXPANDER) {
+        pin &= ~IO_EXPANDER;
+        uint32_t level_mask = 0;
+        esp_err_t err = esp_io_expander_get_level(io_expander, 1 << pin , &level_mask);
+        if (err != ESP_OK)
+       	    log_e("esp_io_expander_get_level(IO%02d --> %d (err=%d))", pin, level_mask >> pin, err);
+        return (level_mask >> pin);
+    }
+#endif
 #ifdef RGB_BUILTIN
   if (pin == RGB_BUILTIN) {
     return RGB_BUILTIN_storage;
@@ -205,7 +259,21 @@ extern void cleanupFunctional(void *arg);
 
 extern void __attachInterruptFunctionalArg(uint8_t pin, voidFuncPtrArg userFunc, void *arg, int intr_type, bool functional) {
   static bool interrupt_initialized = false;
-
+#ifdef IO_EXPANDER
+    if (pin & IO_EXPANDER) {
+#ifdef IO_EXPANDER_DEBUG
+        log_d("setup IRQ pin:%d", pin);
+#endif
+        if (!io_expander) {
+            log_e("io_expander not initialized)");
+            return;
+        }
+        esp_err_t err = esp_io_expander_attach_interrupt(io_expander, pin & ~IO_EXPANDER, (voidIOExpanderCB)userFunc, arg, intr_type);
+        if (err)
+            log_e("failed to attach io expander isr at pin %d (err=%d))", pin, err);
+        return;
+    }
+#endif
   // makes sure that pin -1 (255) will never work -- this follows Arduino standard
   if (pin >= SOC_GPIO_PIN_COUNT) {
     return;
@@ -239,6 +307,8 @@ extern void __attachInterruptFunctionalArg(uint8_t pin, voidFuncPtrArg userFunc,
   gpio_hal_context_t gpiohal;
   gpiohal.dev = GPIO_LL_GET_HW(GPIO_PORT_0);
   gpio_hal_input_enable(&gpiohal, pin);
+
+    log_d("IRQ pin:%d OK", pin);
 }
 
 extern void __attachInterruptArg(uint8_t pin, voidFuncPtrArg userFunc, void *arg, int intr_type) {
@@ -250,6 +320,21 @@ extern void __attachInterrupt(uint8_t pin, voidFuncPtr userFunc, int intr_type) 
 }
 
 extern void __detachInterrupt(uint8_t pin) {
+#ifdef IO_EXPANDER
+    if (pin & IO_EXPANDER) {
+#ifdef IO_EXPANDER_DEBUG
+        log_d("remove IRQ pin:%d", pin);
+#endif
+        if (!io_expander) {
+            log_e("io_expander not initialized)");
+            return;
+        }
+        esp_err_t err = esp_io_expander_detach_interrupt(io_expander, pin & ~IO_EXPANDER);
+        //if (err) log_e("failed to detach io expander isr at pin %d (err=%d))", pin, err);
+        return;
+    }
+#endif
+
   gpio_isr_handler_remove((gpio_num_t)pin);  //remove handle and disable isr for pin
   gpio_wakeup_disable((gpio_num_t)pin);
 
@@ -270,6 +355,13 @@ extern void enableInterrupt(uint8_t pin) {
 extern void disableInterrupt(uint8_t pin) {
   gpio_intr_disable((gpio_num_t)pin);
 }
+
+#ifdef IO_EXPANDER
+void pollInterrupt(void)
+{
+    if (io_expander) esp_io_expander_process_irq(io_expander);
+}
+#endif
 
 extern void pinMode(uint8_t pin, uint8_t mode) __attribute__((weak, alias("__pinMode")));
 extern void digitalWrite(uint8_t pin, uint8_t val) __attribute__((weak, alias("__digitalWrite")));

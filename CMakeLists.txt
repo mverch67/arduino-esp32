@@ -50,6 +50,8 @@ set(CORE_SRCS
   cores/esp32/esp32-hal-touch-ng.c
   cores/esp32/esp32-hal-uart.c
   cores/esp32/esp32-hal-rmt.c
+  cores/esp32/esp_io_expander.c
+  cores/esp32/esp_io_expander_tca95xx_16bit.c
   cores/esp32/Esp.cpp
   cores/esp32/freertos_stats.cpp
   cores/esp32/FunctionalInterrupt.cpp

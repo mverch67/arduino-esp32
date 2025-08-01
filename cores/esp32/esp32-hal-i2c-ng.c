@@ -84,8 +84,10 @@ bool i2cIsInit(uint8_t i2c_num) {
 }
 
 esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency) {
+  log_d("ng-i2cInit: num=%u sda=%d scl=%d freq=%u", i2c_num, sda, scl, frequency);
   esp_err_t ret = ESP_OK;
   if (i2c_num >= SOC_I2C_NUM) {
+    log_e("invalid i2c number %d", i2c_num);
     return ESP_ERR_INVALID_ARG;
   }
 #if !CONFIG_DISABLE_HAL_LOCKS
@@ -118,6 +120,7 @@ esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency) {
   perimanSetBusDeinit(ESP32_BUS_TYPE_I2C_MASTER_SCL, i2cDetachBus);
 
   if (!perimanClearPinBus(sda) || !perimanClearPinBus(scl)) {
+    log_e("could not clear pin bus for sda=%d scl=%d", sda, scl);
     ret = ESP_FAIL;
     goto init_fail;
   }
@@ -164,6 +167,7 @@ esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency) {
       //release lock so that i2cDetachBus can execute i2cDeinit
       xSemaphoreGive(bus[i2c_num].lock);
 #endif
+      log_e("perimanSetPinBus failed for sda=%d scl=%d", sda, scl);
       i2cDetachBus((void *)(i2c_num + 1));
       return ESP_FAIL;
     }

@@ -86,6 +86,7 @@ bool i2cIsInit(uint8_t i2c_num) {
 }
 
 esp_err_t i2cInit(uint8_t i2c_num, int8_t sda, int8_t scl, uint32_t frequency) {
+  log_e("initializing legacy i2cInit, use i2cInitNG instead");
   esp_err_t ret = ESP_OK;
   if (i2c_num >= SOC_I2C_NUM) {
     return ESP_ERR_INVALID_ARG;

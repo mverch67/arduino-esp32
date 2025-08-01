@@ -10,8 +10,12 @@
 #include "esp_bit_defs.h"
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp32-hal-log.h"
 #include "esp_io_expander.h"
 #include "esp_io_expander_tca95xx_16bit.h"
+#include "driver/gpio.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 /* I2C communication related */
 #define I2C_TIMEOUT_MS          (1000)
@@ -51,6 +55,83 @@ static esp_err_t read_direction_reg(esp_io_expander_handle_t handle, uint32_t *v
 static esp_err_t reset(esp_io_expander_t *handle);
 static esp_err_t del(esp_io_expander_t *handle);
 
+#ifdef IO_EXPANDER_IRQ
+static TaskHandle_t xTaskToNotify = NULL;
+
+/**
+ * @brief isr handler to notify a waiting task that some input bits have changed.
+ *        The processing task will process the bits and run the related callbacks
+ */
+
+static void IRAM_ATTR io_expander_isr_handler(void *arg)
+{
+    if (xTaskToNotify) {
+        log_d("IRQ!");
+        BaseType_t xHigherPriorityTaskWoken = pdTRUE;
+        vTaskNotifyGiveFromISR(xTaskToNotify, &xHigherPriorityTaskWoken);
+        xTaskToNotify = NULL;
+        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+    }
+}
+
+/**
+ * @brief Processing routine that will wait for notification from ISR and read the io expander input bits
+ */
+static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handle_t handle)
+{
+    xTaskToNotify = xTaskGetCurrentTaskHandle();
+    
+    if (gpio_get_level((gpio_num_t)IO_EXPANDER_IRQ)) {
+        log_d("esp_io_expander_process: ulTaskNotifyTake portMAX_DELAY");
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    } else {
+        //The INT pin remains at a low level, the interrupt is not cleared, and the input register needs to be read again.
+        log_d("esp_io_expander_process: ulTaskNotifyTake 0");
+        ulTaskNotifyTake(pdTRUE, 0);
+    }
+
+    uint32_t value = 0;
+    esp_err_t err = handle->read_input_reg(handle, &value);
+    if (err != ESP_OK) {
+        log_e("failed to read input pins: %d", err);
+        return err;
+    }
+
+    if (handle->mask == 0) return ESP_OK;
+    for (int i=0; i<IO_COUNT; i++) {
+        if (handle->pinIOExpanderISRs[i].functional) {
+            bool trigger = false;
+            if (handle->pinIOExpanderISRs[i].mode == GPIO_INTR_POSEDGE || handle->pinIOExpanderISRs[i].mode == GPIO_INTR_HIGH_LEVEL) {
+                if ((value & (1 << i)) != 0) {
+                    log_d("IRQ pin rising/high %d", i);
+                    trigger = true;
+                }
+            }
+            else if (handle->pinIOExpanderISRs[i].mode == GPIO_INTR_NEGEDGE || handle->pinIOExpanderISRs[i].mode == GPIO_INTR_LOW_LEVEL) {
+                if ((value & (1 << i)) == 0) {
+                    log_d("IRQ pin falling/low %d", i);
+                    trigger = true;
+                }
+            }
+            else if (handle->pinIOExpanderISRs[i].mode == GPIO_INTR_ANYEDGE) {
+                static int previous = 0;
+                if ((value & (1 << i)) != previous) {
+                    previous = value & (1 << i);
+                    log_d("IRQ pin anyedge %d", i);
+                    trigger = true;
+                }
+            }
+
+            if (trigger) {
+                (handle->pinIOExpanderISRs[i].fn)(handle->pinIOExpanderISRs[i].arg);
+            }
+        }
+    }
+    return ESP_OK;
+}
+#endif
+
+
 esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_master_bus_handle_t i2c_bus, uint32_t dev_addr, esp_io_expander_handle_t *handle_ret)
 {
     ESP_LOGI(TAG, "version: %d.%d.%d", ESP_IO_EXPANDER_TCA95XX_16BIT_VER_MAJOR, ESP_IO_EXPANDER_TCA95XX_16BIT_VER_MINOR,
@@ -78,11 +159,22 @@ esp_err_t esp_io_expander_new_i2c_tca95xx_16bit(i2c_master_bus_handle_t i2c_bus,
     tca->base.read_direction_reg = read_direction_reg;
     tca->base.del = del;
     tca->base.reset = reset;
+#ifdef IO_EXPANDER_IRQ
+    tca->base.process = esp_io_expander_process_irq_tca95xx_16bit;
+#else
+    tca->base.process = NULL;
+#endif
+    tca->base.pinIOExpanderISRs = NULL;
+    tca->base.mask = 0;
 
     /* Reset configuration and register status */
     ESP_GOTO_ON_ERROR(reset(&tca->base), err, TAG, "Reset failed");
 
     *handle_ret = &tca->base;
+
+#ifdef IO_EXPANDER_IRQ
+    esp_io_expander_setup_isr(*handle_ret, io_expander_isr_handler, IO_EXPANDER_IRQ, GPIO_INTR_NEGEDGE);
+#endif
     return ESP_OK;
 err:
     if (tca != NULL) {

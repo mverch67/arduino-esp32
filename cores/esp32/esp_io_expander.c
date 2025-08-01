@@ -253,6 +253,7 @@ static esp_err_t read_reg(esp_io_expander_handle_t handle, reg_type_t reg, uint3
 esp_err_t esp_io_expander_setup_isr(esp_io_expander_handle_t handle, voidIOExpanderISRHandler cb, uint8_t pin, int mode)
 {
     if (!handle->pinIOExpanderISRs) {
+        log_d("esp_io_expander_setup_isr: pinIOExpanderISRs[] is NULL, allocating memory");
         handle->pinIOExpanderISRs = malloc(sizeof(ISRHandle_t) * handle->config.io_count);
         memset(handle->pinIOExpanderISRs, 0, sizeof(ISRHandle_t) * handle->config.io_count);
         attachInterruptArg(pin, cb, handle, mode);
@@ -290,6 +291,9 @@ esp_err_t esp_io_expander_process_irq(esp_io_expander_handle_t handle)
  */
 esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint8_t pin, voidIOExpanderCB cb, void* arg, int intr_type)
 {
+    log_d("esp_io_expander_attach_interrupt: pin=%d, cb=%p, arg=%p, intr_type=%d", pin, cb, arg, intr_type);
+    ESP_RETURN_ON_FALSE(handle, ESP_ERR_INVALID_ARG, TAG, "Invalid handle");
+    ESP_RETURN_ON_FALSE(cb, ESP_ERR_INVALID_ARG, TAG, "Invalid callback");
     if (pin < IO_COUNT_MAX && handle->pinIOExpanderISRs != NULL) {
         handle->pinIOExpanderISRs[pin].fn = cb;
         handle->pinIOExpanderISRs[pin].mode = intr_type;
@@ -298,8 +302,10 @@ esp_err_t esp_io_expander_attach_interrupt(esp_io_expander_handle_t handle, uint
         handle->mask |= (1 << pin);
         return ESP_OK;
     }
-    else
+    else {
+        log_e("Invalid pin or pinIOExpanderISRs");
         return ESP_FAIL;
+    }
 }
 
 /**

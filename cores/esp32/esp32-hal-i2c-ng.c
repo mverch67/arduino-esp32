@@ -35,6 +35,7 @@ extern esp_io_expander_handle_t io_expander;
 
 static void prvProcessISRCallback(void* arg)
 {
+    log_i("IO Expander ISR callback started.");
     while (true) {
         esp_io_expander_process_irq(io_expander);
         vTaskDelay(5);

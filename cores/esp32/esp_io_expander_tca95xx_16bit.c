@@ -66,7 +66,7 @@ static TaskHandle_t xTaskToNotify = NULL;
 static void IRAM_ATTR io_expander_isr_handler(void *arg)
 {
     if (xTaskToNotify) {
-        log_d("IRQ!");
+        //log_d("IRQ!");
         BaseType_t xHigherPriorityTaskWoken = pdTRUE;
         vTaskNotifyGiveFromISR(xTaskToNotify, &xHigherPriorityTaskWoken);
         xTaskToNotify = NULL;
@@ -82,11 +82,9 @@ static esp_err_t esp_io_expander_process_irq_tca95xx_16bit(esp_io_expander_handl
     xTaskToNotify = xTaskGetCurrentTaskHandle();
     
     if (gpio_get_level((gpio_num_t)IO_EXPANDER_IRQ)) {
-        log_d("esp_io_expander_process: ulTaskNotifyTake portMAX_DELAY");
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
     } else {
         //The INT pin remains at a low level, the interrupt is not cleared, and the input register needs to be read again.
-        log_d("esp_io_expander_process: ulTaskNotifyTake 0");
         ulTaskNotifyTake(pdTRUE, 0);
     }
 

@@ -136,7 +136,11 @@
 #define NOT_ON_TIMER     0
 
 // some defines generic for all SoC moved from variants/board_name/pins_arduino.h
+#ifdef IO_EXPANDER
+#define NUM_DIGITAL_PINS SOC_GPIO_PIN_COUNT + IO_EXPANDER // All GPIOs
+#else
 #define NUM_DIGITAL_PINS SOC_GPIO_PIN_COUNT  // All GPIOs
+#endif
 #if SOC_ADC_PERIPH_NUM == 1
 #define NUM_ANALOG_INPUTS (SOC_ADC_CHANNEL_NUM(0))  // Depends on the SoC (ESP32C6, ESP32H2, ESP32C2, ESP32P4)
 #elif SOC_ADC_PERIPH_NUM == 2

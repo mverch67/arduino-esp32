@@ -132,15 +132,15 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode) {
     }
 #endif
 
-  if (!GPIO_IS_VALID_GPIO(pin)) {
-    log_e("Invalid IO %i selected", pin);
+  if (pin >= SOC_GPIO_PIN_COUNT) {
+    log_e("Invalid IO %u selected", pin);
     return;
   }
 
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) == NULL) {
     perimanSetBusDeinit(ESP32_BUS_TYPE_GPIO, gpioDetachBus);
     if (!perimanClearPinBus(pin)) {
-      log_e("Deinit of previous bus from IO %i failed", pin);
+      log_e("Deinit of previous bus from IO %u failed", pin);
       return;
     }
   }
@@ -172,7 +172,7 @@ extern void ARDUINO_ISR_ATTR __pinMode(uint8_t pin, uint8_t mode) {
     }
   }
   if (gpio_config(&conf) != ESP_OK) {
-    log_e("IO %i config failed", pin);
+    log_e("IO %u config failed", pin);
     return;
   }
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) == NULL) {
@@ -217,7 +217,7 @@ extern void ARDUINO_ISR_ATTR __digitalWrite(uint8_t pin, uint8_t val) {
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) != NULL) {
     gpio_set_level((gpio_num_t)pin, val);
   } else {
-    log_w("IO %i is not set as GPIO. Execute digitalMode(%i, OUTPUT) first.", pin, pin);
+    log_w("IO %i is not set as GPIO. Execute digitalMode(%u, OUTPUT) first.", pin, pin);
     __pinMode(pin, OUTPUT);
   }
 }
@@ -244,7 +244,7 @@ extern int ARDUINO_ISR_ATTR __digitalRead(uint8_t pin) {
 #endif  // RGB_BUILTIN
   // This work when the pin is set as GPIO and in INPUT mode. For all other pin functions, it may return inconsistent response
   if (perimanGetPinBus(pin, ESP32_BUS_TYPE_GPIO) == NULL) {
-    log_w("IO %i is not set as GPIO. digitalRead() may return an inconsistent value.", pin);
+    log_w("IO %u is not set as GPIO. digitalRead() may return an inconsistent value.", pin);
   }
   return gpio_get_level((gpio_num_t)pin);
 }
@@ -289,7 +289,7 @@ extern void __attachInterruptFunctionalArg(uint8_t pin, voidFuncPtrArg userFunc,
     interrupt_initialized = (err == ESP_OK) || (err == ESP_ERR_INVALID_STATE);
   }
   if (!interrupt_initialized) {
-    log_e("IO %i ISR Service Failed To Start", pin);
+    log_e("IO %u ISR Service Failed To Start", pin);
     return;
   }
 

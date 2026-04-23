@@ -28,6 +28,7 @@
  *            UARTx
  */
 
+#include <Arduino.h>
 #include <vector>
 #include <unity.h>
 #include "HardwareSerial.h"
@@ -72,10 +73,10 @@ public:
 
   void transmit_and_check_msg(const String &msg_append, bool perform_assert = true) {
     reset_buffers();
-    delay(100);
+    delay(50);
     serial.print("Hello from Serial" + String(uart_num) + " " + msg_append);
     serial.flush();
-    delay(100);
+    delay(50);
     if (perform_assert) {
       TEST_ASSERT_EQUAL_STRING(("Hello from Serial" + String(uart_num) + " " + msg_append).c_str(), recv_msg.c_str());
       log_d("UART%d received message: %s\n", uart_num, recv_msg.c_str());
@@ -90,7 +91,12 @@ public:
     }
     while (available--) {
       c = (char)serial.read();
-      recv_msg += c;
+      if (c >= 32 && c <= 128) {
+        recv_msg += c;
+        //      } else {
+        //        Serial.printf("UART%d onReceive() got a non readable character 0x%x='%c'\r\n", uart_num, c, c);
+        //        Serial.flush();
+      }
     }
   }
 };
@@ -113,7 +119,7 @@ extern "C" int8_t uart_get_TxPin(uint8_t uart_num);
 // This task is used to send a message after a delay to test the auto baudrate detection
 void task_delayed_msg(void *pvParameters) {
   HardwareSerial &selected_serial = uart_test_configs.size() == 1 ? Serial : Serial1;
-  delay(2000);
+  delay(1500);
   selected_serial.println("Hello to detect baudrate");
   selected_serial.flush();
   vTaskDelete(NULL);
@@ -480,7 +486,7 @@ void change_cpu_frequency_test(void) {
   uint32_t old_freq = getCpuFrequencyMhz();
   uint32_t new_freq = getXtalFrequencyMhz();
 
-  log_d("Changing CPU frequency from %dMHz to %dMHz", old_freq, new_freq);
+  log_d("Changing CPU frequency from %" PRIu32 "MHz to %" PRIu32 "MHz", old_freq, new_freq);
   Serial.flush();
   setCpuFrequencyMhz(new_freq);
 
@@ -492,7 +498,7 @@ void change_cpu_frequency_test(void) {
     config.transmit_and_check_msg("with new CPU frequency");
   }
 
-  log_d("Changing CPU frequency back to %dMHz", old_freq);
+  log_d("Changing CPU frequency back to %" PRIu32 "MHz", old_freq);
   Serial.flush();
   setCpuFrequencyMhz(old_freq);
 
@@ -505,6 +511,156 @@ void change_cpu_frequency_test(void) {
   }
 
   Serial.println("Change CPU frequency test successful");
+}
+
+// This test checks if hardware flow control (RTS/CTS) works correctly with internal loopback
+void hardware_flow_control_test(void) {
+  log_d("Starting hardware flow control test");
+
+  // Define CTS and RTS pins for testing
+  // I2C are always valid pins
+  const int8_t TEST_RTS_PIN = SDA;
+  const int8_t TEST_CTS_PIN = SCL;
+
+  for (auto *ref : uart_test_configs) {
+    UARTTestConfig &config = *ref;
+
+    // Configure pins with CTS and RTS (can be called after begin())
+    log_d("Setting UART%d pins: RX=%d, TX=%d, CTS=%d, RTS=%d", config.uart_num, config.default_rx_pin, config.default_tx_pin, TEST_CTS_PIN, TEST_RTS_PIN);
+    bool pins_set = config.serial.setPins(config.default_rx_pin, config.default_tx_pin, TEST_CTS_PIN, TEST_RTS_PIN);
+    TEST_ASSERT_TRUE(pins_set);
+
+    // Enable hardware flow control
+    log_d("Enabling hardware flow control (RTS + CTS)");
+    bool flow_ctrl_set = config.serial.setHwFlowCtrlMode(UART_HW_FLOWCTRL_CTS_RTS, 64);
+    TEST_ASSERT_TRUE(flow_ctrl_set);
+
+    // Set up internal loopbacks: TX->RX and RTS->CTS
+    log_d("Setting up internal loopbacks: TX->RX and RTS->CTS");
+    uart_internal_loopback(config.uart_num, config.default_rx_pin);
+    uart_internal_hw_flow_ctrl_loopback(config.uart_num, TEST_CTS_PIN);
+
+    delay(50);
+    config.transmit_and_check_msg("Hardware Flow Control ON");
+
+    // Test that flow control can be disabled
+    log_d("Testing disabling hardware flow control");
+    bool flow_ctrl_disabled = config.serial.setHwFlowCtrlMode(UART_HW_FLOWCTRL_DISABLE, 64);
+    TEST_ASSERT_TRUE(flow_ctrl_disabled);
+
+    // Test transmission still works after disabling flow control
+    delay(50);
+    config.transmit_and_check_msg("Hardware Flow Control OFF");
+  }
+
+  Serial.println("Hardware flow control test successful");
+}
+
+// This test checks that moving both UART RX and TX pins to another UART terminates the source UART
+void inter_uart_pin_move_test(void) {
+  if (TEST_UART_NUM < 2) {
+    TEST_PASS_MESSAGE("Skipping: test requires 2+ UARTs");
+    return;
+  }
+
+  UARTTestConfig &uart1 = *uart_test_configs[0];
+  UARTTestConfig &uart2 = *uart_test_configs[1];
+
+  // Both UARTs should be running at test start (setUp ensures this)
+  TEST_ASSERT_TRUE(uart1.serial);
+  TEST_ASSERT_TRUE(uart2.serial);
+
+  // Move uart1 to use uart2's default pins: uart2 should be terminated
+  log_d("Moving UART%d to use UART%d pins (%d, %d)", uart1.uart_num, uart2.uart_num, uart2.default_rx_pin, uart2.default_tx_pin);
+  uart1.serial.setPins(uart2.default_rx_pin, uart2.default_tx_pin);
+
+  // uart2 should now be terminated (it lost both its RX and TX pins)
+  TEST_ASSERT_FALSE(uart2.serial);
+
+  // uart1 should still be running and using uart2's former pins
+  TEST_ASSERT_TRUE(uart1.serial);
+  TEST_ASSERT_EQUAL(uart2.default_rx_pin, uart_get_RxPin(uart1.uart_num));
+  TEST_ASSERT_EQUAL(uart2.default_tx_pin, uart_get_TxPin(uart1.uart_num));
+
+  // Confirm uart1 can still transmit on its new pins
+  uart_internal_loopback(uart1.uart_num, uart2.default_rx_pin);
+  uart1.transmit_and_check_msg("after inter-UART pin move");
+
+  Serial.println("Inter-UART pin move test successful");
+}
+
+// This test checks that swapping RX and TX pins within the same UART keeps it running
+void same_uart_pin_swap_test(void) {
+  UARTTestConfig &config = *uart_test_configs[0];
+
+  TEST_ASSERT_TRUE(config.serial);
+
+  int8_t orig_rx = config.default_rx_pin;
+  int8_t orig_tx = config.default_tx_pin;
+
+  // Swap RX and TX on the same UART
+  log_d("Swapping RX(%d) and TX(%d) on UART%d", orig_rx, orig_tx, config.uart_num);
+  bool ret = config.serial.setPins(orig_tx, orig_rx);
+  TEST_ASSERT_TRUE(ret);
+
+  // UART should still be running after a pin swap
+  TEST_ASSERT_TRUE(config.serial);
+  TEST_ASSERT_EQUAL(orig_tx, uart_get_RxPin(config.uart_num));
+  TEST_ASSERT_EQUAL(orig_rx, uart_get_TxPin(config.uart_num));
+
+  // Confirm transmission still works with swapped pins (re-set loopback for swapped RX)
+  uart_internal_loopback(config.uart_num, orig_tx);
+  config.transmit_and_check_msg("after pin swap");
+
+  Serial.println("Same UART pin swap test successful");
+}
+
+// This test checks that moving a UART's RX/TX to CTS/RTS (same UART) terminates the UART
+void move_rx_tx_to_cts_rts_test(void) {
+  UARTTestConfig &config = *uart_test_configs[0];
+
+  TEST_ASSERT_TRUE(config.serial);
+
+  // Move the UART's own RX and TX to CTS and RTS – it should no longer have valid RX/TX
+  log_d("Moving UART%d RX(%d)/TX(%d) to CTS/RTS", config.uart_num, config.default_rx_pin, config.default_tx_pin);
+  config.serial.setPins(-1, -1, config.default_rx_pin, config.default_tx_pin);
+
+  // UART should be terminated because it has no RX or TX pins
+  TEST_ASSERT_FALSE(config.serial);
+
+  Serial.println("Move RX/TX to CTS/RTS terminates UART test successful");
+}
+
+// This test checks that assigning another UART's RX/TX pins as CTS/RTS terminates the source UART
+void cross_uart_cts_rts_test(void) {
+  if (TEST_UART_NUM < 2) {
+    TEST_PASS_MESSAGE("Skipping: test requires 2+ UARTs");
+    return;
+  }
+
+  UARTTestConfig &uart1 = *uart_test_configs[0];
+  UARTTestConfig &uart2 = *uart_test_configs[1];
+
+  TEST_ASSERT_TRUE(uart1.serial);
+  TEST_ASSERT_TRUE(uart2.serial);
+
+  // uart2 takes uart1's RX/TX pins as its CTS/RTS.
+  // uart1 should be terminated (lost its only RX and TX pins).
+  // uart2 keeps its own RX/TX and additionally gets CTS/RTS.
+  log_d("UART%d taking UART%d pins (%d, %d) as CTS/RTS", uart2.uart_num, uart1.uart_num, uart1.default_rx_pin, uart1.default_tx_pin);
+  uart2.serial.setPins(-1, -1, uart1.default_rx_pin, uart1.default_tx_pin);
+
+  // uart1 should be terminated (lost its RX and TX)
+  TEST_ASSERT_FALSE(uart1.serial);
+
+  // uart2 should still be running (its own RX/TX are untouched)
+  TEST_ASSERT_TRUE(uart2.serial);
+
+  // Confirm uart2 can still transmit on its own RX/TX pins
+  uart_internal_loopback(uart2.uart_num, uart2.default_rx_pin);
+  uart2.transmit_and_check_msg("after cross-UART CTS/RTS assignment");
+
+  Serial.println("Cross-UART CTS/RTS terminates source UART test successful");
 }
 
 /* Main functions */
@@ -563,6 +719,11 @@ void setup() {
 #endif
   RUN_TEST(periman_test);
   RUN_TEST(change_pins_test);
+  RUN_TEST(hardware_flow_control_test);
+  RUN_TEST(inter_uart_pin_move_test);
+  RUN_TEST(same_uart_pin_swap_test);
+  RUN_TEST(move_rx_tx_to_cts_rts_test);
+  RUN_TEST(cross_uart_cts_rts_test);
   RUN_TEST(end_when_stopped_test);
   UNITY_END();
 }

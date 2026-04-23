@@ -212,7 +212,7 @@ static tusb_desc_device_t tinyusb_device_descriptor = {
   .bDeviceClass = 0,
   .bDeviceSubClass = 0,
   .bDeviceProtocol = 0,
-  .bMaxPacketSize0 = CFG_TUD_ENDOINT0_SIZE,
+  .bMaxPacketSize0 = CFG_TUD_ENDPOINT0_SIZE,
 
   .idVendor = 0,
   .idProduct = 0,
@@ -700,7 +700,9 @@ static bool tinyusb_load_enabled_interfaces() {
     //usb_persist_enabled = true;
     //log_d("USB Persist enabled");
   }
-  log_d("Load Done: if_num: %u, descr_len: %u, if_mask: 0x%x", tinyusb_loaded_interfaces_num, tinyusb_config_descriptor_len, tinyusb_loaded_interfaces_mask);
+  log_d(
+    "Load Done: if_num: %u, descr_len: %u, if_mask: 0x%" PRIx32, tinyusb_loaded_interfaces_num, tinyusb_config_descriptor_len, tinyusb_loaded_interfaces_mask
+  );
   return true;
 }
 
@@ -789,7 +791,7 @@ static void usb_device_task(void *param) {
  * PUBLIC API
  * */
 #if ARDUHAL_LOG_LEVEL >= ARDUHAL_LOG_LEVEL_ERROR
-const char *tinyusb_interface_names[USB_INTERFACE_MAX] = {"MSC", "DFU", "HID", "VENDOR", "CDC", "CDC2", "MIDI", "CUSTOM"};
+const char *tinyusb_interface_names[USB_INTERFACE_MAX] = {"MSC", "DFU", "HID", "VENDOR", "CDC", "CDC2", "MIDI", "AUDIO", "CUSTOM"};
 #endif
 static bool tinyusb_is_initialized = false;
 

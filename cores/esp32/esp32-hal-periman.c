@@ -6,6 +6,7 @@
 
 #include "esp32-hal-log.h"
 #include "esp32-hal-periman.h"
+#include "esp32-hal-ldo.h"
 #include "esp_bit_defs.h"
 
 typedef struct ATTR_PACKED {
@@ -111,6 +112,15 @@ const char *perimanGetTypeName(peripheral_bus_type_t type) {
     case ESP32_BUS_TYPE_PPP_RTS: return "PPP_MODEM_RTS";
     case ESP32_BUS_TYPE_PPP_CTS: return "PPP_MODEM_CTS";
 #endif
+#if defined(CONFIG_ESP_HOSTED_ENABLE_BT_NIMBLE) || defined(CONFIG_ESP_WIFI_REMOTE_ENABLED)
+    case ESP32_BUS_TYPE_ESP_HOSTED_SDIO_CLK: return "ESP_HOSTED_SDIO_CLK";
+    case ESP32_BUS_TYPE_ESP_HOSTED_SDIO_CMD: return "ESP_HOSTED_SDIO_CMD";
+    case ESP32_BUS_TYPE_ESP_HOSTED_SDIO_D0:  return "ESP_HOSTED_SDIO_D0";
+    case ESP32_BUS_TYPE_ESP_HOSTED_SDIO_D1:  return "ESP_HOSTED_SDIO_D1";
+    case ESP32_BUS_TYPE_ESP_HOSTED_SDIO_D2:  return "ESP_HOSTED_SDIO_D2";
+    case ESP32_BUS_TYPE_ESP_HOSTED_SDIO_D3:  return "ESP_HOSTED_SDIO_D3";
+    case ESP32_BUS_TYPE_ESP_HOSTED_SDIO_RST: return "ESP_HOSTED_SDIO_RST";
+#endif
     default: return "UNKNOWN";
   }
 }
@@ -157,6 +167,9 @@ bool perimanSetPinBus(uint8_t pin, peripheral_bus_type_t type, void *bus, int8_t
   pins[pin].bus_num = bus_num;
   pins[pin].bus_channel = bus_channel;
   pins[pin].extra_type = NULL;
+#if defined(SOC_GP_LDO_SUPPORTED) && SOC_GP_LDO_SUPPORTED
+  ldoPerimanPinBusSet(pin, otype, type);
+#endif
   log_v("Pin %u successfully set to type %s (%u) with bus %p", pin, perimanGetTypeName(type), (unsigned int)type, bus);
   return true;
 }

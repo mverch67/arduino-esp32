@@ -1,5 +1,5 @@
 name=ESP32 Arduino
-version=3.3.8
+version=3.3.9
 
 tools.esp32-arduino-libs.path={runtime.platform.path}/tools/esp32-arduino-libs
 tools.esp32-arduino-libs.path.windows={runtime.platform.path}\tools\esp32-arduino-libs
@@ -23,6 +23,9 @@ tools.gen_esp32part.cmd.windows="{runtime.platform.path}\tools\gen_esp32part.exe
 
 tools.gen_insights_pkg.cmd=python3 "{runtime.platform.path}"/tools/gen_insights_package.py
 tools.gen_insights_pkg.cmd.windows="{runtime.platform.path}\tools\gen_insights_package.exe"
+
+tools.flasher.cmd=python3 "{runtime.platform.path}/tools/flasher.py"
+tools.flasher.cmd.windows="{runtime.platform.path}\tools\flasher.exe"
 
 compiler.path={tools.{build.tarch}-esp-elf-gcc.path}/bin/
 compiler.prefix={build.tarch}-{build.target}-elf-
@@ -52,7 +55,7 @@ compiler.cpreprocessor.flags="@{compiler.sdk.path}/flags/defines" "-I{build.sour
 compiler.c.flags=-MMD -c "@{compiler.sdk.path}/flags/c_flags" {compiler.warning_flags} {compiler.optimization_flags} {compiler.common_werror_flags}
 compiler.cpp.flags=-MMD -c "@{compiler.sdk.path}/flags/cpp_flags" {compiler.warning_flags} {compiler.optimization_flags} {compiler.common_werror_flags}
 compiler.S.flags=-MMD -c -x assembler-with-cpp "@{compiler.sdk.path}/flags/S_flags" {compiler.warning_flags} {compiler.optimization_flags}
-compiler.c.elf.flags="-Wl,--Map={build.path}/{build.project_name}.map" "-L{compiler.sdk.path}/lib" "-L{compiler.sdk.path}/ld" "-L{compiler.sdk.path}/{build.memory_type}" "-Wl,--wrap=esp_panic_handler" "@{compiler.sdk.path}/flags/ld_flags" "@{compiler.sdk.path}/flags/ld_scripts"
+compiler.c.elf.flags="-Wl,--Map={build.path}/{build.project_name}.map" "-L{compiler.sdk.path}/lib" "-L{compiler.sdk.path}/ld" "-L{compiler.sdk.path}/{build.memory_type}" "-Wl,--wrap=esp_panic_handler" "-Wl,--wrap=esp_bt_mem_release" "-Wl,--wrap=esp_bt_controller_mem_release" "@{compiler.sdk.path}/flags/ld_flags" "@{compiler.sdk.path}/flags/ld_scripts"
 compiler.c.elf.libs="@{compiler.sdk.path}/flags/ld_libs"
 compiler.ar.flags=cr
 
@@ -186,6 +189,10 @@ recipe.hooks.objcopy.postobjcopy.3.pattern="{tools.esptool_py.path}/{tools.espto
 # Do NOT change the spacing: specifically, do not insert whitespace between a closing quote (') and the following redirection/operator symbols (>, >>, &&). This avoids a bug in older arduino-builder versions shipped with IDE 1.x, which occurs if a quote (') character is directly followed by a whitespace.
 recipe.hooks.objcopy.postobjcopy.4.pattern=/usr/bin/env bash -c "echo '--flash-mode {build.flash_mode} --flash-freq {build.img_freq} --flash-size {build.flash_size}'>'{build.path}/flash_args'&& echo '{build.bootloader_addr} {build.project_name}.bootloader.bin'>> '{build.path}/flash_args'&& echo '0x8000 {build.project_name}.partitions.bin'>> '{build.path}/flash_args'&& echo '0xe000 boot_app0.bin'>> '{build.path}/flash_args'&& echo '0x10000 {build.project_name}.bin'>> '{build.path}/flash_args'"
 recipe.hooks.objcopy.postobjcopy.4.pattern.windows=cmd /c echo --flash-mode {build.flash_mode} --flash-freq {build.img_freq} --flash-size {build.flash_size} > "{build.path}\flash_args" && echo {build.bootloader_addr} {build.project_name}.bootloader.bin >> "{build.path}\flash_args" && echo 0x8000 {build.project_name}.partitions.bin >> "{build.path}\flash_args" && echo 0xe000 boot_app0.bin >> "{build.path}\flash_args" && echo 0x10000 {build.project_name}.bin >> "{build.path}\flash_args"
+
+# Copy boot_app0.bin into the build directory so flash_args is self-contained
+recipe.hooks.objcopy.postobjcopy.5.pattern=/usr/bin/env bash -c "cp -f '{runtime.platform.path}/tools/partitions/boot_app0.bin' '{build.path}/boot_app0.bin'"
+recipe.hooks.objcopy.postobjcopy.5.pattern.windows=cmd /c copy /y "{runtime.platform.path}\tools\partitions\boot_app0.bin" "{build.path}\boot_app0.bin"
 
 ## Save bin
 recipe.output.tmp_file={build.project_name}.bin
@@ -337,14 +344,14 @@ tools.esptool_py.upload.protocol=serial
 tools.esptool_py.upload.params.verbose=
 tools.esptool_py.upload.params.quiet=
 tools.esptool_py.upload.pattern_args=--chip {build.mcu} --port "{serial.port}" --baud {upload.speed} {upload.flags} --before default-reset --after hard-reset write-flash {upload.erase_cmd} -z --flash-mode keep --flash-freq keep --flash-size keep {build.bootloader_addr} "{build.path}/{build.project_name}.bootloader.bin" 0x8000 "{build.path}/{build.project_name}.partitions.bin" 0xe000 "{runtime.platform.path}/tools/partitions/boot_app0.bin" 0x10000 "{build.path}/{build.project_name}.bin" {upload.extra_flags}
-tools.esptool_py.upload.pattern="{path}/{cmd}" {upload.pattern_args}
+tools.esptool_py.upload.pattern={tools.flasher.cmd} --esptool "{path}/{cmd}" --build-dir "{build.path}" {upload.pattern_args}
 
 ## Program Application
 ## -------------------
 tools.esptool_py.program.params.verbose=
 tools.esptool_py.program.params.quiet=
 tools.esptool_py.program.pattern_args=--chip {build.mcu} --port "{serial.port}" --baud {upload.speed} {upload.flags} --before default-reset --after hard-reset write-flash -z --flash-mode keep --flash-freq keep --flash-size keep 0x10000 "{build.path}/{build.project_name}.bin"
-tools.esptool_py.program.pattern="{path}/{cmd}" {program.pattern_args}
+tools.esptool_py.program.pattern={tools.flasher.cmd} --esptool "{path}/{cmd}" --build-dir "{build.path}" {program.pattern_args}
 
 ## Erase Chip (before burning the bootloader)
 ## ------------------------------------------
@@ -396,4 +403,4 @@ tools.esptool_py_app_only.upload.params.quiet=
 
 tools.esptool_py_app_only.upload.pattern_args=--chip {build.mcu} --port "{serial.port}" --baud {upload.speed} {upload.flags} --before default-reset --after hard-reset write-flash --flash-mode {build.flash_mode} --flash-freq {build.flash_freq} --flash-size {build.flash_size} {build.flash_offset} "{build.path}/{build.project_name}.bin" {upload.extra_flags}
 
-tools.esptool_py_app_only.upload.pattern="{path}/{cmd}" {tools.esptool_py_app_only.upload.pattern_args}
+tools.esptool_py_app_only.upload.pattern={tools.flasher.cmd} --esptool "{path}/{cmd}" --build-dir "{build.path}" {tools.esptool_py_app_only.upload.pattern_args}

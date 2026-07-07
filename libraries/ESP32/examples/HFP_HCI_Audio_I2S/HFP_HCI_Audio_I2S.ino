@@ -65,7 +65,7 @@
 // Includes
 // -----------------------------------------------------------------------------
 #include <Arduino.h>
-#include "esp32-hal-bt-mem.h"          // btStartMode(), BT_MODE_CLASSIC_BT
+#include "esp32-hal-alloc-bt-classic-mem.h"
 #include "esp32-hal-bt.h"              // btStarted()
 #include "esp_bt.h"                    // esp_bt_controller_*
 #include "esp_bt_device.h"             // esp_bt_dev_set_device_name()
@@ -734,7 +734,11 @@ void setup() {
 
   // Advertise a friendly name so the phone's Bluetooth menu shows something
   // recognizable rather than a raw MAC address.
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(6, 0, 0)
+  logEspCall("esp_bt_gap_set_device_name", esp_bt_gap_set_device_name("ESP32_HFP_BRIDGE"));
+#else
   logEspCall("esp_bt_dev_set_device_name", esp_bt_dev_set_device_name("ESP32_HFP_BRIDGE"));
+#endif
 
   // Set the Class of Device (CoD) to Audio/Video + Hands-free subclass.
   // This tells the phone the device is a hands-free unit so it offers HFP

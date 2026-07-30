@@ -68,7 +68,7 @@ Bring-up:
 ifconfig up
 thread start
 udp open
-udp bind :: 61631
+udp bind :: 5050
 ```
 
 ## Sleep behavior
@@ -196,11 +196,61 @@ TX payload:
 id=<nodeId>,seq=<u32>,temp_centi=<i32>,batt_mv=<u16>
 ```
 
-ACK expected:
+ACK expected (the value is the collector's authoritative last-stored sequence
+for this node, not necessarily the one just sent):
 
 ```text
-OK,<nodeId>,<seq>
+OK,<nodeId>,<collectorLastSeq>
 ```
+
+## Reliable delivery (application-level ACK + collector-driven sequence)
+
+The Thread link layer (MAC ACKs, mesh forwarding) can look healthy even when the
+collector application is gone, so it is not a reliable signal that data was
+*received and processed*. This sketch therefore treats the collector's
+**application-level ACK as the only ground truth of delivery**, and makes the
+**collector the single source of truth for the sequence number**:
+
+- The frame for a sample uses `seq = lastConfirmedSeq + 1`.
+- `sendFrameAndWaitAck()` only considers an ACK that is a real UDP-receive line,
+  whose source is **not** one of this node's own addresses (so a looped-back
+  frame can never be mistaken for an ACK), and whose `id` field matches ours. It
+  then reads the **sequence number out of the ACK**.
+- After a valid ACK the node **resyncs** its local counter to the collector's
+  reported sequence: it rolls back if it had run ahead, or skips forward if the
+  collector ignored a stale frame. So the node can never drift away from the
+  collector's view.
+- If the ACK sequence equals the frame just sent, the sample is `ACKED`. If it
+  differs, the node logs a `Resync:` line and reports `RESYNC` for that sample.
+- If **no** ACK arrives at all (collector off/unreachable), the sequence is
+  **held** (not advanced), the same reading is retransmitted up to `TX_RETRIES`
+  times, and the sample is reported `NO_ACK (sequence held)` - the count never
+  moves forward without proof of delivery.
+
+### "It still shows ACKED after I turned the collector off"
+
+When the node prints `status=ACKED`, the collector’s ACK carried the same sequence number as the frame just sent (`OK,<id>,<collectorLastSeq>` where `collectorLastSeq == seq`). The collector can only generate such an ACK after actually receiving that datagram, so if the node keeps printing `status=ACKED` for brand-new sequence numbers, a device really is receiving and answering them — a powered-off board cannot invent new sequence numbers. Check:
+
+- The collector is **truly unpowered**, not just reset or with its serial monitor
+  closed. Over USB the board stays powered and keeps ACKing; a reset makes it
+  resume the saved network from NVS and keep ACKing. Unplug it (or hold it in
+  reset) to actually stop it.
+- The `ACK ... <-` source address is **not** one of the node's own addresses.
+  The sketch prints `My Mesh-Local EID` and `My own addresses` at startup, and
+  logs `Ignoring datagram from own address ...` if it ever sees a self-sourced
+  frame. If the ACK source matches one of your own addresses, you are seeing
+  loopback, not a remote collector.
+- No second board on the bench is running the collector sketch.
+
+### Node reset
+
+The node id is derived from the factory EUI-64, so it is stable across a reset,
+but `s_seq` restarts at 0 (next frame `seq=1`). The collector still holds the
+old (higher) sequence for that id, so it recognizes `seq=1` as a **restart**,
+follows the node back to 1, logs `node <id> restarted: sequence reset to 1`, and
+ACKs `1`. The node then continues normally from there. (Other backward jumps are
+treated as stale and ignored, and the node is told the collector's real last seq
+so it resyncs forward.)
 
 ## Expected serial output
 
@@ -209,10 +259,19 @@ OK,<nodeId>,<seq>
 ...
 Role: Child
 Node ID: 3CAAB123
-Collector group: ff03::abcd:61631
-TX [ff03::abcd]:61631 -> 'id=3CAAB123,seq=1,temp_centi=2312,batt_mv=3820'
-ACK [fd..]:61631 <- 'OK,3CAAB123,1'
-sample=1 temp=23.12C batt=3820mV status=ACKED
+Collector group: ff03::abcd:5050
+TX [ff03::abcd]:5050 -> 'id=3CAAB123,seq=1,temp_centi=2312,batt_mv=3820'
+ACK [fd..]:5050 <- 'OK,3CAAB123,1'
+sample seq=1 temp=23.12C batt=3820mV status=ACKED
+```
+
+With the collector powered off you instead see the sequence held:
+
+```text
+TX [ff03::abcd]:5050 -> 'id=3CAAB123,seq=2,temp_centi=2298,batt_mv=3810'
+TX [ff03::abcd]:5050 -> 'id=3CAAB123,seq=2,temp_centi=2298,batt_mv=3810' (retransmit)
+ACK timeout (no valid ACK from collector)
+sample seq=2 temp=22.98C batt=3810mV status=NO_ACK (sequence held)
 ```
 
 ## Customization
@@ -220,9 +279,26 @@ sample=1 temp=23.12C batt=3820mV status=ACKED
 Tune these constants in `udp_sensor_node.ino`:
 
 - `SAMPLE_PERIOD_MS`
+- `ACK_TIMEOUT_MS` (how long to wait for the collector's ACK per attempt)
+- `TX_RETRIES` (immediate resends of the same sequence before reporting NO_ACK)
 - `USE_SLEEPY_MODE`
 - `SED_POLL_MS`
 - `CHILD_TIMEOUT_S`
+
+## Troubleshooting
+
+**Startup order:** Flash [CLI UDP sensor collector (Leader)](https://github.com/espressif/arduino-esp32/tree/master/libraries/OpenThread/examples/CLI/UDP/udp_sensor_collector) first and wait for `Attached as Leader` and `Collector listening on UDP ff03::abcd:5050`. Then flash this sensor sketch. Reset the sensor if it booted before the collector was ready.
+
+| Symptom | Likely cause |
+| --- | --- |
+| No ACK on sensor (`NO_ACK`) | Collector not running or not bound — start collector first; verify matching dataset constants on both sketches. |
+| `status=ACKED` with collector unplugged | Board still powered over USB or second collector on bench — truly unpower collector or hold in reset. |
+| ACK from own address (loopback) | Sketch ignores self-sourced datagrams — check `My own addresses` at startup; ACK source must be remote. |
+| Sleepy node never reconnects after collector reboot | Parent gone until child timeout — sketch forces re-attach after `REATTACH_AFTER_MISSED` consecutive misses; lower `CHILD_TIMEOUT_S` for faster recovery. |
+| Sleepy mode not active | Missing sdkconfig flags (`CONFIG_OPENTHREAD_MTD`, `CONFIG_IEEE802154_SLEEP_ENABLE`, `CONFIG_PM_ENABLE`) — sketch continues as regular child. |
+| Collector reboot, node table empty | Expected — collector rebuilds from incoming frames; sensor keeps multicasting same sequence until ACKed. |
+| `Error ...` after `udp open/bind/send` | Thread not attached (`state` not child/router) or wrong CLI command order. |
+| Node reset, collector logs `(restart)` | Normal — node id stable (EUI-64), sequence resets to 1; collector follows restart. |
 
 ## License
 

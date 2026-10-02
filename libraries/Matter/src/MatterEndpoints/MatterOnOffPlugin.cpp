@@ -16,7 +16,6 @@
 #ifdef CONFIG_ESP_MATTER_ENABLE_DATA_MODEL
 
 #include <Matter.h>
-#include <app/server/Server.h>
 #include <MatterEndpoints/MatterOnOffPlugin.h>
 
 using namespace esp_matter;
@@ -67,18 +66,19 @@ bool MatterOnOffPlugin::begin(bool initialState) {
     return false;
   }
 
-  on_off_plugin_unit::config_t plugin_config;
+  on_off_plug_in_unit::config_t plugin_config;
   plugin_config.on_off.on_off = initialState;
-  plugin_config.on_off.lighting.start_up_on_off = nullptr;
+  plugin_config.on_off_lighting.start_up_on_off = nullptr;
 
   // endpoint handles can be used to add/modify clusters.
-  endpoint_t *endpoint = on_off_plugin_unit::create(node::get(), &plugin_config, ENDPOINT_FLAG_NONE, (void *)this);
+  endpoint_t *endpoint = on_off_plug_in_unit::create(node::get(), &plugin_config, ENDPOINT_FLAG_NONE, (void *)this);
   if (endpoint == nullptr) {
     log_e("Failed to create on-off plugin endpoint");
     return false;
   }
   onOffState = initialState;
   setEndPointId(endpoint::get_id(endpoint));
+
   log_i("On-Off Plugin created with endpoint_id %u", getEndPointId());
 
   started = true;

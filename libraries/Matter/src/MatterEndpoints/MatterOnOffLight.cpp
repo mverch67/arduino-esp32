@@ -16,7 +16,6 @@
 #ifdef CONFIG_ESP_MATTER_ENABLE_DATA_MODEL
 
 #include <Matter.h>
-#include <app/server/Server.h>
 #include <MatterEndpoints/MatterOnOffLight.h>
 
 using namespace esp_matter;
@@ -69,7 +68,7 @@ bool MatterOnOffLight::begin(bool initialState) {
 
   on_off_light::config_t light_config;
   light_config.on_off.on_off = initialState;
-  light_config.on_off.lighting.start_up_on_off = nullptr;
+  light_config.on_off_lighting.start_up_on_off = nullptr;
   onOffState = initialState;
 
   // endpoint handles can be used to add/modify clusters.
@@ -80,6 +79,7 @@ bool MatterOnOffLight::begin(bool initialState) {
   }
 
   setEndPointId(endpoint::get_id(endpoint));
+
   log_i("On-Off Light created with endpoint_id %u", getEndPointId());
 
   started = true;

@@ -17,7 +17,6 @@
 
 #include <inttypes.h>
 #include <Matter.h>
-#include <app/server/Server.h>
 #include <MatterEndpoints/MatterLightSensor.h>
 
 using namespace esp_matter;
@@ -59,9 +58,9 @@ bool MatterLightSensor::begin(uint16_t _rawIlluminance) {
   }
 
   light_sensor::config_t light_sensor_config;
-  light_sensor_config.illuminance_measurement.illuminance_measured_value = _rawIlluminance;
-  light_sensor_config.illuminance_measurement.illuminance_min_measured_value = nullptr;
-  light_sensor_config.illuminance_measurement.illuminance_max_measured_value = nullptr;
+  light_sensor_config.illuminance_measurement.measured_value = _rawIlluminance;
+  light_sensor_config.illuminance_measurement.min_measured_value = nullptr;
+  light_sensor_config.illuminance_measurement.max_measured_value = nullptr;
 
   // endpoint handles can be used to add/modify clusters.
   endpoint_t *endpoint = light_sensor::create(node::get(), &light_sensor_config, ENDPOINT_FLAG_NONE, (void *)this);
@@ -71,6 +70,7 @@ bool MatterLightSensor::begin(uint16_t _rawIlluminance) {
   }
   rawIlluminance = _rawIlluminance;
   setEndPointId(endpoint::get_id(endpoint));
+
   log_i("Light Sensor created with endpoint_id %d", getEndPointId());
 
   started = true;

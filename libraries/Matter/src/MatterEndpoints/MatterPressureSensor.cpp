@@ -51,9 +51,9 @@ bool MatterPressureSensor::begin(int16_t _rawPressure) {
   }
 
   pressure_sensor::config_t pressure_sensor_config;
-  pressure_sensor_config.pressure_measurement.pressure_measured_value = _rawPressure;
-  pressure_sensor_config.pressure_measurement.pressure_min_measured_value = nullptr;
-  pressure_sensor_config.pressure_measurement.pressure_max_measured_value = nullptr;
+  pressure_sensor_config.pressure_measurement.measured_value = _rawPressure;
+  pressure_sensor_config.pressure_measurement.min_measured_value = nullptr;
+  pressure_sensor_config.pressure_measurement.max_measured_value = nullptr;
 
   // endpoint handles can be used to add/modify clusters
   endpoint_t *endpoint = pressure_sensor::create(node::get(), &pressure_sensor_config, ENDPOINT_FLAG_NONE, (void *)this);
@@ -63,6 +63,7 @@ bool MatterPressureSensor::begin(int16_t _rawPressure) {
   }
   rawPressure = _rawPressure;
   setEndPointId(endpoint::get_id(endpoint));
+
   log_i("Pressure Sensor created with endpoint_id %u", getEndPointId());
 
   started = true;
@@ -100,7 +101,7 @@ bool MatterPressureSensor::setRawPressure(int16_t _rawPressure) {
     }
     rawPressure = _rawPressure;
   }
-  log_v("Pressure Sensor set to %.02f Degrees", (float)_rawPressure / 100.00);
+  log_v("Pressure Sensor set to %d hPa", _rawPressure);
 
   return true;
 }

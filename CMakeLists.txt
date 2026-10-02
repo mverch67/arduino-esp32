@@ -6,7 +6,7 @@
 #   idf.py build
 
 set(min_supported_idf_version "5.3.0")
-set(max_supported_idf_version "6.0.99")
+set(max_supported_idf_version "6.1.99")
 set(idf_version "${IDF_VERSION_MAJOR}.${IDF_VERSION_MINOR}.${IDF_VERSION_PATCH}")
 
 if ("${idf_version}" AND NOT "$ENV{ARDUINO_SKIP_IDF_VERSION_CHECK}")
@@ -76,6 +76,7 @@ set(CORE_SRCS
   cores/esp32/Tone.cpp
   cores/esp32/HWCDC.cpp
   cores/esp32/USB.cpp
+  cores/esp32/USBHost.cpp
   cores/esp32/USBCDC.cpp
   cores/esp32/USBMSC.cpp
   cores/esp32/FirmwareMSC.cpp
@@ -98,6 +99,7 @@ set(ARDUINO_ALL_LIBRARIES
   ESP_NOW
   ESP_SR
   ESP_HostedOTA
+  ESP_Video
   ESPmDNS
   Ethernet
   FFat
@@ -105,6 +107,7 @@ set(ARDUINO_ALL_LIBRARIES
   Hash
   HTTPClient
   HTTPUpdate
+  HTTPUpdateServer
   Insights
   LittleFS
   Matter
@@ -160,6 +163,8 @@ set(ARDUINO_LIBRARY_ESP_SR_SRCS
 set(ARDUINO_LIBRARY_ESP_HostedOTA_SRCS
   libraries/ESP_HostedOTA/src/ESP_HostedOTA.cpp)
 
+set(ARDUINO_LIBRARY_ESP_Video_SRCS libraries/ESP_Video/src/ESP_Video.cpp)
+
 set(ARDUINO_LIBRARY_ESPmDNS_SRCS libraries/ESPmDNS/src/ESPmDNS.cpp)
 
 set(ARDUINO_LIBRARY_Ethernet_SRCS libraries/Ethernet/src/ETH.cpp)
@@ -179,7 +184,7 @@ set(ARDUINO_LIBRARY_Hash_SRCS
 
 set(ARDUINO_LIBRARY_HTTPClient_SRCS libraries/HTTPClient/src/HTTPClient.cpp)
 
-set(ARDUINO_LIBRARY_HTTPUpdate_SRCS libraries/HTTPUpdate/src/HTTPUpdate.cpp)
+set(ARDUINO_LIBRARY_HTTPUpdate_SRCS libraries/HTTPUpdate/src/HTTPUpdate.cpp libraries/HTTPUpdate/src/HTTPUpdateChecksum.cpp)
 
 set(ARDUINO_LIBRARY_Insights_SRCS libraries/Insights/src/Insights.cpp)
 
@@ -190,7 +195,11 @@ set(ARDUINO_LIBRARY_NetBIOS_SRCS libraries/NetBIOS/src/NetBIOS.cpp)
 set(ARDUINO_LIBRARY_OpenThread_SRCS
   libraries/OpenThread/src/OThread.cpp
   libraries/OpenThread/src/OThreadCLI.cpp
-  libraries/OpenThread/src/OThreadCLI_Util.cpp)
+  libraries/OpenThread/src/OThreadUDP.cpp
+  libraries/OpenThread/src/OThreadCoAP.cpp
+  libraries/OpenThread/src/OThreadCLI_Util.cpp
+  libraries/OpenThread/src/OThreadScan.cpp
+  libraries/OpenThread/src/OThreadDNSSD.cpp)
 
 set(ARDUINO_LIBRARY_Matter_SRCS
   libraries/Matter/src/MatterEndpoints/MatterGenericSwitch.cpp
@@ -215,7 +224,12 @@ set(ARDUINO_LIBRARY_Matter_SRCS
   libraries/Matter/src/MatterEndpoints/MatterWindowCovering.cpp
   libraries/Matter/src/MatterEndpoints/MatterLightSensor.cpp
   libraries/Matter/src/Matter.cpp
-  libraries/Matter/src/MatterEndPoint.cpp)
+  libraries/Matter/src/MatterHelpers.cpp
+  libraries/Matter/src/MatterButton.cpp
+  libraries/Matter/src/MatterIdentity.cpp
+  libraries/Matter/src/MatterEndPoint.cpp
+  libraries/Matter/src/MatterWiFiStackWrap.cpp
+  libraries/Matter/src/MatterMemWrap.cpp)
 
 set(ARDUINO_LIBRARY_PPP_SRCS libraries/PPP/src/PPP.cpp)
 
@@ -248,14 +262,26 @@ set(ARDUINO_LIBRARY_Ticker_SRCS libraries/Ticker/src/Ticker.cpp)
 
 set(ARDUINO_LIBRARY_Update_SRCS
   libraries/Update/src/Updater.cpp
+  libraries/Update/src/UpdaterSHA256.cpp
+  libraries/Update/src/UpdaterSHA512.cpp
   libraries/Update/src/HttpsOTAUpdate.cpp
   libraries/Update/src/Updater_Signing.cpp)
 
 set(ARDUINO_LIBRARY_USB_SRCS
   libraries/USB/src/USBAudioCard.cpp
   libraries/USB/src/USBHID.cpp
+  libraries/USB/src/USBHIDReportMapParse.c
   libraries/USB/src/USBMIDI.cpp
   libraries/USB/src/USBHIDMouse.cpp
+  libraries/USB/src/USBHostHID.cpp
+  libraries/USB/src/USBHostHIDMouse.cpp
+  libraries/USB/src/USBHostHIDGamepad.cpp
+  libraries/USB/src/USBHostHIDKeyboard.cpp
+  libraries/USB/src/USBHostHIDKeyboardDecode.cpp
+  libraries/USB/src/USBHostHIDReportMapDump.cpp
+  libraries/USB/src/USBHostMSC.cpp
+  libraries/USB/src/USBHostSerial.cpp
+  libraries/USB/src/USBMSCFS.cpp
   libraries/USB/src/USBHIDKeyboard.cpp
   libraries/USB/src/keyboardLayout/KeyboardLayout_da_DK.cpp
   libraries/USB/src/keyboardLayout/KeyboardLayout_de_DE.cpp
@@ -493,6 +519,25 @@ if(CONFIG_OPENTHREAD_ENABLED AND CONFIG_SOC_IEEE802154_SUPPORTED)
     "-u __wrap_otPlatMessagePoolDeinit")
 endif()
 
+# Matter: skip CHIP InitWiFiStack when Thread or Ethernet is selected.
+# --wrap of a missing symbol is ignored (H2 has no Wi-Fi stack).
+if(CONFIG_ESP_MATTER_ENABLE_DATA_MODEL AND CONFIG_ENABLE_WIFI_STATION)
+  idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_ZN4chip11DeviceLayer8Internal10ESP32Utils13InitWiFiStackEv" APPEND)
+  target_link_libraries(${COMPONENT_LIB} INTERFACE "-u __wrap__ZN4chip11DeviceLayer8Internal10ESP32Utils13InitWiFiStackEv")
+endif()
+
+# Matter data model: prefer SPIRAM when that heap exists (bypass malloc 4096 rule).
+# C++ mangled names from harvested libespressif__esp_matter.a (nm-confirmed).
+if(CONFIG_ESP_MATTER_ENABLE_DATA_MODEL)
+  idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_Z21esp_matter_mem_callocjj" APPEND)
+  idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_Z22esp_matter_mem_reallocPvj" APPEND)
+  idf_build_set_property(LINK_OPTIONS "-Wl,--wrap=_Z19esp_matter_mem_freePv" APPEND)
+  target_link_libraries(${COMPONENT_LIB} INTERFACE
+    "-u __wrap__Z21esp_matter_mem_callocjj"
+    "-u __wrap__Z22esp_matter_mem_reallocPvj"
+    "-u __wrap__Z19esp_matter_mem_freePv")
+endif()
+
 # This function adds a dependency on the given component if the component is included into the build.
 function(maybe_add_component component_name)
     idf_build_get_property(components BUILD_COMPONENTS)
@@ -513,10 +558,16 @@ if(NOT CONFIG_ARDUINO_SELECTIVE_COMPILATION OR CONFIG_ARDUINO_SELECTIVE_ESP_SR)
 endif()
 if(NOT CONFIG_ARDUINO_SELECTIVE_COMPILATION OR CONFIG_ARDUINO_SELECTIVE_Matter)
     maybe_add_component(espressif__esp_matter)
+
 endif()
 if(NOT CONFIG_ARDUINO_SELECTIVE_COMPILATION OR CONFIG_ARDUINO_SELECTIVE_LittleFS)
     maybe_add_component(joltwallet__littlefs)
 endif()
 if(NOT CONFIG_ARDUINO_SELECTIVE_COMPILATION OR CONFIG_ARDUINO_SELECTIVE_WiFiProv)
     maybe_add_component(espressif__network_provisioning)
+endif()
+if(NOT CONFIG_ARDUINO_SELECTIVE_COMPILATION OR CONFIG_ARDUINO_SELECTIVE_ESP_Video)
+    if(IDF_TARGET STREQUAL "esp32s3" OR IDF_TARGET STREQUAL "esp32p4")
+        maybe_add_component(espressif__esp_video)
+    endif()
 endif()

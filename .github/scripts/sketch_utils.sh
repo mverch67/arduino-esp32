@@ -25,6 +25,11 @@ function check_requirements { # check_requirements <sketchdir> <sdkconfig_path>
                 [[ -z "$requirement" ]] && continue
                 found_line=$(grep -E "^$requirement" "$sdkconfig_path")
                 if [[ "$found_line" == "" ]]; then
+                    # C5 publishes one Wi-Fi sdkconfig. Matter-over-Thread is
+                    # Tools → Matter Network → Thread (overlay + .thread.a).
+                    if [[ "$requirement" == "CONFIG_ENABLE_MATTER_OVER_THREAD=y" && "$sdkconfig_path" == *"/esp32c5/"* ]]; then
+                        continue
+                    fi
                     has_requirements=0
                 fi
             done <<< "$requirements"
@@ -51,7 +56,165 @@ function check_requirements { # check_requirements <sketchdir> <sdkconfig_path>
         fi
     fi
 
-    echo $has_requirements
+    echo "$has_requirements"
+}
+
+# Join FQBN menu options, dropping empty entries and keeping only the last value
+# given for each menu key. Callers list options lowest priority first, so a test
+# can override a per-target default instead of emitting the same key twice, which
+# arduino-cli does not resolve predictably. Each key keeps the position of its
+# first appearance, so the resulting FQBN stays stable.
+function _normalize_fqbn_opts {
+    echo "$1" | tr ',' '\n' | awk '
+        {
+            gsub(/^[[:space:]]+|[[:space:]]+$/, "")
+            if ($0 == "") {
+                next
+            }
+            eq = index($0, "=")
+            key = (eq ? substr($0, 1, eq - 1) : $0)
+            if (!(key in value)) {
+                order[++count] = key
+            }
+            value[key] = $0
+        }
+        END {
+            for (i = 1; i <= count; i++) {
+                printf "%s%s", (i > 1 ? "," : ""), value[order[i]]
+            }
+            printf "\n"
+        }
+    '
+}
+
+# Force ESP32-P4 Serial mapping for the environment. Applied last so it wins
+# over target defaults, fqbn_append, full FQBNs from ci.yml, and -fqbn.
+# CI hardware runners talk to UART0, so CDC on boot must be Disabled
+# (CDCOnBoot=default). Local and Wokwi use USB Serial/JTAG, so Enabled
+# (CDCOnBoot=cdc).
+function apply_cdc_on_boot_opt {
+    local fqbn="$1"
+    local board
+    board=$(echo "$fqbn" | cut -d':' -f3)
+    if [ "$board" != "esp32p4" ]; then
+        echo "$fqbn"
+        return 0
+    fi
+
+    local base options cdc_opt
+    base=$(echo "$fqbn" | cut -d':' -f1-3)
+    options=$(echo "$fqbn" | cut -d':' -f4-)
+    if [ "${CI:-false}" = "true" ]; then
+        cdc_opt="CDCOnBoot=default"
+    else
+        cdc_opt="CDCOnBoot=cdc"
+    fi
+    echo "${base}:$(_normalize_fqbn_opts "${options},${cdc_opt}")"
+}
+
+function default_fqbn_for_target {
+    local target="$1"
+    local options_override="${2:-}"
+    local debug_level="${3:-}"
+    local extra_opts="${4:-}"
+    local pkg="${5:-espressif:esp32}"
+    local fqbn_append="${6:-}"
+
+    local opt=""
+
+    # Lowest priority first: per-target defaults, then the test's fqbn_append,
+    # then options the caller asked for, then the debug level from the command
+    # line. Duplicate menu keys are resolved by _normalize_fqbn_opts.
+    local overrides="${fqbn_append},${extra_opts},${debug_level}"
+
+    local esp32_opts esp32s2_opts esp32s3_opts esp32c3_opts esp32c6_opts esp32h2_opts esp32p4_opts esp32c5_opts
+    esp32_opts=$(_normalize_fqbn_opts "PSRAM=enabled,${overrides}")
+    esp32s2_opts=$(_normalize_fqbn_opts "PSRAM=enabled,${overrides}")
+    esp32s3_opts=$(_normalize_fqbn_opts "PSRAM=opi,USBMode=default,${overrides}")
+    esp32c3_opts=$(_normalize_fqbn_opts "${overrides}")
+    esp32c6_opts=$(_normalize_fqbn_opts "${overrides}")
+    esp32h2_opts=$(_normalize_fqbn_opts "${overrides}")
+    esp32p4_opts=$(_normalize_fqbn_opts "PSRAM=enabled,USBMode=hwcdc,ChipVariant=postv3,${overrides}")
+    esp32c5_opts=$(_normalize_fqbn_opts "PSRAM=enabled,${overrides}")
+
+    local result=""
+    case "$target" in
+        esp32)
+            [ -n "${options_override:-$esp32_opts}" ] && opt=":${options_override:-$esp32_opts}"
+            result="${pkg}:esp32${opt}"
+            ;;
+        esp32s2)
+            [ -n "${options_override:-$esp32s2_opts}" ] && opt=":${options_override:-$esp32s2_opts}"
+            result="${pkg}:esp32s2${opt}"
+            ;;
+        esp32c3)
+            [ -n "${options_override:-$esp32c3_opts}" ] && opt=":${options_override:-$esp32c3_opts}"
+            result="${pkg}:esp32c3${opt}"
+            ;;
+        esp32s3)
+            [ -n "${options_override:-$esp32s3_opts}" ] && opt=":${options_override:-$esp32s3_opts}"
+            result="${pkg}:esp32s3${opt}"
+            ;;
+        esp32c6)
+            [ -n "${options_override:-$esp32c6_opts}" ] && opt=":${options_override:-$esp32c6_opts}"
+            result="${pkg}:esp32c6${opt}"
+            ;;
+        esp32h2)
+            [ -n "${options_override:-$esp32h2_opts}" ] && opt=":${options_override:-$esp32h2_opts}"
+            result="${pkg}:esp32h2${opt}"
+            ;;
+        esp32p4)
+            [ -n "${options_override:-$esp32p4_opts}" ] && opt=":${options_override:-$esp32p4_opts}"
+            result="${pkg}:esp32p4${opt}"
+            ;;
+        esp32c5)
+            [ -n "${options_override:-$esp32c5_opts}" ] && opt=":${options_override:-$esp32c5_opts}"
+            result="${pkg}:esp32c5${opt}"
+            ;;
+        *)
+            echo "ERROR: Invalid chip: $target" >&2
+            return 1
+            ;;
+    esac
+    apply_cdc_on_boot_opt "$result"
+}
+
+# Read the fqbn_append options a ci.yml requests for one target. The field is
+# either a string applied to every target, or a map of per-target entries with an
+# optional "default" entry. Map entries are merged with "default", the per-target
+# entry winning, so a test only has to spell out what differs on that target.
+# The field defaults to the top level fqbn_append, but any path can be given so
+# that the per-device fields of a multi-device test resolve the same way.
+function fqbn_append_for_target { # fqbn_append_for_target <ci_yml> <target> [yq_path]
+    local ci_yml="$1"
+    local target="$2"
+    local path="${3:-.fqbn_append}"
+
+    if [ ! -f "$ci_yml" ]; then
+        return 0
+    fi
+
+    local value
+    if [ "$(yq eval "${path} | type" "$ci_yml" 2>/dev/null)" == "!!map" ]; then
+        local common specific
+        common=$(yq eval "${path}.default // \"\"" "$ci_yml" 2>/dev/null)
+        specific=$(yq eval "${path}.\"${target}\" // \"\"" "$ci_yml" 2>/dev/null)
+        value="${common},${specific}"
+    else
+        value=$(yq eval "${path} // \"\"" "$ci_yml" 2>/dev/null)
+    fi
+
+    _normalize_fqbn_opts "$value"
+}
+
+function default_upload_test_fqbn {
+    default_fqbn_for_target "$1" "" "" "UploadSpeed=115200" "${2:-espressif:esp32}"
+}
+
+function split_fqbn_for_cli {
+    local fqbn="$1"
+    CLI_FQBN_OPTIONS=$(echo "$fqbn" | cut -d':' -f4-)
+    CLI_FQBN_BASE=$(echo "$fqbn" | cut -d':' -f1-3)
 }
 
 function build_sketch { # build_sketch <ide_path> <user_path> <path-to-ino> [extra-options]
@@ -100,6 +263,10 @@ function build_sketch { # build_sketch <ide_path> <user_path> <path-to-ino> [ext
         -bn )
             shift
             build_name=$1
+            ;;
+        -fa )
+            shift
+            fqbn_append_override=$1
             ;;
         --arduino-cli )
             use_arduino_cli=1
@@ -160,72 +327,17 @@ function build_sketch { # build_sketch <ide_path> <user_path> <path-to-ino> [ext
 
             len=1
 
+            # Options passed with -fa are merged on top of the ones the ci.yml
+            # asks for, so a single device of a multi-device test can add to or
+            # override them without losing the ones shared by the whole test.
             if [ -n "$ci_yml_for_build" ]; then
-                fqbn_append=$(yq eval '.fqbn_append' "$ci_yml_for_build" 2>/dev/null)
-                if [ "$fqbn_append" == "null" ]; then
-                    fqbn_append=""
-                fi
+                fqbn_append=$(fqbn_append_for_target "$ci_yml_for_build" "$target")
+            fi
+            if [ -n "${fqbn_append_override:-}" ]; then
+                fqbn_append=$(_normalize_fqbn_opts "${fqbn_append},${fqbn_append_override}")
             fi
 
-            # Default FQBN options if none were passed in the command line.
-            # Replace any double commas with a single one and strip leading and
-            # trailing commas.
-
-            esp32_opts=$(echo "PSRAM=enabled,$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-            esp32s2_opts=$(echo "PSRAM=enabled,$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-            esp32s3_opts=$(echo "PSRAM=opi,USBMode=default,$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-            esp32c3_opts=$(echo "$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-            esp32c6_opts=$(echo "$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-            esp32h2_opts=$(echo "$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-            esp32p4_opts=$(echo "PSRAM=enabled,USBMode=default,ChipVariant=postv3,$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-            esp32c5_opts=$(echo "PSRAM=enabled,$debug_level,$fqbn_append" | sed 's/^,*//;s/,*$//;s/,\{2,\}/,/g')
-
-            # Select the common part of the FQBN based on the target.  The rest will be
-            # appended depending on the passed options.
-
-            opt=""
-
-            case "$target" in
-                "esp32")
-                    [ -n "${options:-$esp32_opts}" ] && opt=":${options:-$esp32_opts}"
-                    fqbn="espressif:esp32:esp32$opt"
-                ;;
-                "esp32s2")
-                    [ -n "${options:-$esp32s2_opts}" ] && opt=":${options:-$esp32s2_opts}"
-                    fqbn="espressif:esp32:esp32s2$opt"
-                ;;
-                "esp32c3")
-                    [ -n "${options:-$esp32c3_opts}" ] && opt=":${options:-$esp32c3_opts}"
-                    fqbn="espressif:esp32:esp32c3$opt"
-                ;;
-                "esp32s3")
-                    [ -n "${options:-$esp32s3_opts}" ] && opt=":${options:-$esp32s3_opts}"
-                    fqbn="espressif:esp32:esp32s3$opt"
-                ;;
-                "esp32c6")
-                    [ -n "${options:-$esp32c6_opts}" ] && opt=":${options:-$esp32c6_opts}"
-                    fqbn="espressif:esp32:esp32c6$opt"
-                ;;
-                "esp32h2")
-                    [ -n "${options:-$esp32h2_opts}" ] && opt=":${options:-$esp32h2_opts}"
-                    fqbn="espressif:esp32:esp32h2$opt"
-                ;;
-                "esp32p4")
-                    [ -n "${options:-$esp32p4_opts}" ] && opt=":${options:-$esp32p4_opts}"
-                    fqbn="espressif:esp32:esp32p4$opt"
-                ;;
-                "esp32c5")
-                    [ -n "${options:-$esp32c5_opts}" ] && opt=":${options:-$esp32c5_opts}"
-                    fqbn="espressif:esp32:esp32c5$opt"
-                ;;
-                *)
-                    echo "ERROR: Invalid chip: $target"
-                    exit 1
-                ;;
-            esac
-
-            # Make it look like a JSON array.
-
+            fqbn=$(default_fqbn_for_target "$target" "$options" "${debug_level:-}" "" "espressif:esp32" "$fqbn_append") || exit 1
             fqbn="[\"$fqbn\"]"
         fi
     else
@@ -293,13 +405,13 @@ function build_sketch { # build_sketch <ide_path> <user_path> <path-to-ino> [ext
         mkdir -p "$build_dir"
 
         currfqbn=$(echo "$fqbn" | jq -r --argjson i "$i" '.[$i]')
+        currfqbn=$(apply_cdc_on_boot_opt "$currfqbn")
 
         if [ "${use_arduino_cli:-0}" -eq 1 ] && [ -f "$ide_path/arduino-cli" ]; then
             echo "Building $sketchname with arduino-cli and FQBN=$currfqbn"
-            local curroptions
-            local currcli_fqbn
-            curroptions=$(echo "$currfqbn" | cut -d':' -f4)
-            currcli_fqbn=$(echo "$currfqbn" | cut -d':' -f1-3)
+            split_fqbn_for_cli "$currfqbn"
+            local curroptions="$CLI_FQBN_OPTIONS"
+            local currcli_fqbn="$CLI_FQBN_BASE"
             "$ide_path"/arduino-cli compile \
                 --fqbn "$currcli_fqbn" \
                 --board-options "$curroptions" \
@@ -355,9 +467,8 @@ function build_sketch { # build_sketch <ide_path> <user_path> <path-to-ino> [ext
             ram_bytes=$(grep -oE 'Global variables use ([0-9]+) bytes' "$output_file" | awk '{print $4}')
             ram_percentage=$(grep -oE 'Global variables use ([0-9]+) bytes \(([0-9]+)%\)' "$output_file" | awk '{print $6}' | tr -d '(%)')
 
-            directory_path=$(dirname "$sketch")
             constant_part="/home/runner/Arduino/hardware/espressif/esp32/libraries/"
-            lib_sketch_name="${directory_path#"$constant_part"}"
+            lib_sketch_name="${sketchdir#"$constant_part"}"
             echo "{\"name\": \"$lib_sketch_name\",
                 \"sizes\": [{
                         \"flash_bytes\": $flash_bytes,
@@ -781,6 +892,8 @@ Available commands:
     chunk_build: Build a chunk of sketches.
     check_requirements: Check if target meets sketch requirements.
     install_libs: Install libraries from ci.yml file.
+    default_upload_test_fqbn: Print default mock-upload FQBN for a SoC (target [pkg_prefix]).
+    fqbn_append: Print the fqbn_append options a ci.yml sets for a target (ci_yml target [yq_path]).
 "
 
 cmd=$1
@@ -802,8 +915,12 @@ case "$cmd" in
     ;;
     "install_libs") install_libs "$@"
     ;;
+    "default_upload_test_fqbn") default_upload_test_fqbn "$@"
+    ;;
+    "fqbn_append") fqbn_append_for_target "$@"
+    ;;
     *)
         echo "ERROR: Unrecognized command"
         echo "$USAGE"
         exit 2
-esac
+    esac

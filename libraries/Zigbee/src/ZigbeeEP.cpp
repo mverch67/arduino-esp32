@@ -147,12 +147,9 @@ bool ZigbeeEP::readClusterAttribute(esp_zb_zcl_read_attr_cmd_t *read_req) {
     log_w("Cannot read attribute: failed to acquire Zigbee lock");
     return false;
   }
-  esp_err_t ret = esp_zb_zcl_read_attr_cmd_req(read_req);
+  // Returns transaction sequence number (queued), not esp_err_t — ignore it
+  esp_zb_zcl_read_attr_cmd_req(read_req);
   esp_zb_lock_release();
-  if (ret != ESP_OK) {
-    log_e("Failed to read attribute: 0x%x: %s", ret, esp_err_to_name(ret));
-    return false;
-  }
   return true;
 }
 
@@ -191,12 +188,9 @@ bool ZigbeeEP::configureClusterReporting(esp_zb_zcl_config_report_cmd_t *report_
     log_w("Cannot configure cluster reporting: failed to acquire Zigbee lock");
     return false;
   }
-  esp_err_t ret = esp_zb_zcl_config_report_cmd_req(report_cmd);
+  // Returns transaction sequence number (queued), not esp_err_t — ignore it
+  esp_zb_zcl_config_report_cmd_req(report_cmd);
   esp_zb_lock_release();
-  if (ret != ESP_OK) {
-    log_e("Failed to configure cluster reporting: 0x%x: %s", ret, esp_err_to_name(ret));
-    return false;
-  }
   return true;
 }
 
@@ -846,6 +840,27 @@ void ZigbeeEP::addPrivilegeCommand(uint16_t cluster_id, uint16_t command_id) {
       "Failed to add privilege command for endpoint %u, cluster 0x%04x, command 0x%04x: 0x%x: %s", _endpoint, cluster_id, command_id, ret, esp_err_to_name(ret)
     );
   }
+}
+
+bool ZigbeeEP::sendIASZoneEnrollResponse(
+  uint16_t dst_short_addr, uint8_t dst_endpoint, uint8_t zone_id, esp_zb_zcl_ias_zone_enroll_response_code_t response_code
+) {
+  esp_zb_zcl_ias_zone_enroll_response_cmd_t cmd_resp;
+  memset(&cmd_resp, 0, sizeof(cmd_resp));
+  cmd_resp.zcl_basic_cmd.dst_addr_u.addr_short = dst_short_addr;
+  cmd_resp.zcl_basic_cmd.dst_endpoint = dst_endpoint;
+  cmd_resp.zcl_basic_cmd.src_endpoint = _endpoint;
+  cmd_resp.address_mode = ESP_ZB_APS_ADDR_MODE_16_ENDP_PRESENT;
+  cmd_resp.enroll_rsp_code = (uint8_t)response_code;
+  cmd_resp.zone_id = zone_id;
+
+  if (!acquireCommandLock()) {
+    return false;
+  }
+  esp_zb_zcl_ias_zone_enroll_cmd_resp(&cmd_resp);
+  releaseCommandLock();
+  log_v("IAS Zone Enroll Response sent to 0x%04x endpoint %u (zone id %u, code %u)", dst_short_addr, dst_endpoint, zone_id, (uint8_t)response_code);
+  return true;
 }
 
 void ZigbeeEP::zbPrivilegeCommand(const esp_zb_zcl_privilege_command_message_t *message) {
